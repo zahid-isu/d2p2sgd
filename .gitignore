@@ -1,0 +1,12 @@
+# Ignore data directory
+data/
+cifar10/
+ckpt/
+log/
+webiste/
+# Ignore .pth files
+*.pth
+*.tar
+*.md
+*.pt
+
