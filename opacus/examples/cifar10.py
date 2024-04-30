@@ -70,11 +70,7 @@ def plot_combined_results(train_results, sigma, batch_size, seed):
     axs[1].set_ylabel('Testing Accuracy')
     axs[1].legend()
  
-    fig.suptitle('CNN on CIFAR10 with and without Differential Privacy')
-    plt.savefig('log/sgd_vs_dp-sgd.png')
-
- 
-    fig.suptitle(f'CNN on Cifar10 dataset')
+    fig.suptitle(f'CNN on Cifar10 dataset sigma_{sigma}_batch_{batch_size}_seed_{seed}')
     plt.savefig(f'log/CNN_cifar/sgd_vs_dp-sgd_sigma_{sigma}_batch_{batch_size}_seed_{seed}.png')
 
 def setup(args):
