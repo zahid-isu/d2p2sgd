@@ -38,7 +38,7 @@ from torch.func import grad_and_value, vmap
 from torch.nn.parallel import DistributedDataParallel as DDP
 from torchvision.datasets import CIFAR10
 from tqdm import tqdm
-
+import matplotlib.pyplot as plt
 
 logging.basicConfig(
     format="%(asctime)s:%(levelname)s:%(message)s",
@@ -48,6 +48,34 @@ logging.basicConfig(
 logger = logging.getLogger("ddp")
 logger.setLevel(level=logging.INFO)
 
+
+def plot_combined_results(train_results, sigma, batch_size, seed):
+    train_losses_non_dp, accuracy_per_epoch_non_dp = train_results['non-DP']
+    train_losses_dp, accuracy_per_epoch_dp = train_results['DP']
+
+    epochs = range(1, len(train_losses_non_dp) + 1)
+    fig, axs = plt.subplots(2, figsize=(10, 10))
+
+    # Plot training losses
+    axs[0].plot(epochs, train_losses_non_dp, label='Training Loss SGD', color='blue')
+    axs[0].plot(epochs, train_losses_dp, label='Training Loss DP-SGD', color='red')
+    axs[0].set_xlabel('Epochs')
+    axs[0].set_ylabel('Training Loss')
+    axs[0].legend()
+
+    # Plot testing accuracies
+    axs[1].plot(epochs, accuracy_per_epoch_non_dp, label='Testing Accuracy SGD', color='green')
+    axs[1].plot(epochs, accuracy_per_epoch_dp, label='Testing Accuracy DP-SGD', color='purple')
+    axs[1].set_xlabel('Epochs')
+    axs[1].set_ylabel('Testing Accuracy')
+    axs[1].legend()
+ 
+    fig.suptitle('CNN on CIFAR10 with and without Differential Privacy')
+    plt.savefig('log/sgd_vs_dp-sgd.png')
+
+ 
+    fig.suptitle(f'CNN on Cifar10 dataset')
+    plt.savefig(f'log/CNN_cifar/sgd_vs_dp-sgd_sigma_{sigma}_batch_{batch_size}_seed_{seed}.png')
 
 def setup(args):
     if not torch.cuda.is_available():
@@ -208,7 +236,7 @@ def train(args, model, train_loader, optimizer, privacy_engine, epoch, device):
                     f"Acc@1: {np.mean(top1_acc):.6f} "
                 )
     train_duration = datetime.now() - start_time
-    return train_duration
+    return losses, train_duration
 
 
 def test(args, model, test_loader, device):
@@ -244,155 +272,167 @@ def main():
     if args.debug >= 1:
         logger.setLevel(level=logging.DEBUG)
 
-    # Sets `world_size = 1` if you run on a single GPU with `args.local_rank = -1`
-    if args.local_rank != -1 or args.device != "cpu":
-        rank, local_rank, world_size = setup(args)
-        device = local_rank
-    else:
-        device = "cpu"
-        rank = 0
-        world_size = 1
+    train_results = {}  # Dictionary to hold training results for DP and non-DP
 
-    if args.secure_rng:
-        try:
-            import torchcsprng as prng
-        except ImportError as e:
-            msg = (
-                "To use secure RNG, you must install the torchcsprng package! "
-                "Check out the instructions here: https://github.com/pytorch/csprng#installation"
+    for dp_mode in [True, False]: # vanilla-SGD and DP-SGD
+        args.disable_dp = dp_mode
+
+        # Sets `world_size = 1` if you run on a single GPU with `args.local_rank = -1`
+        if args.local_rank != -1 or args.device != "cpu":
+            rank, local_rank, world_size = setup(args)
+            device = local_rank
+        else:
+            device = "cpu"
+            rank = 0
+            world_size = 1
+
+        if args.secure_rng:
+            try:
+                import torchcsprng as prng
+            except ImportError as e:
+                msg = (
+                    "To use secure RNG, you must install the torchcsprng package! "
+                    "Check out the instructions here: https://github.com/pytorch/csprng#installation"
+                )
+                raise ImportError(msg) from e
+
+            generator = prng.create_random_device_generator("/dev/urandom")
+
+        else:
+            generator = None
+
+        augmentations = [
+            transforms.RandomCrop(32, padding=4),
+            transforms.RandomHorizontalFlip(),
+        ]
+        normalize = [
+            transforms.ToTensor(),
+            transforms.Normalize((0.4914, 0.4822, 0.4465), (0.2023, 0.1994, 0.2010)),
+        ]
+        train_transform = transforms.Compose(
+            augmentations + normalize if args.disable_dp else normalize
+        )
+
+        test_transform = transforms.Compose(normalize)
+
+        train_dataset = CIFAR10(
+            root=args.data_root, train=True, download=True, transform=train_transform
+        )
+
+        train_loader = torch.utils.data.DataLoader(
+            train_dataset,
+            batch_size=args.batch_size,
+            generator=generator,
+            num_workers=args.workers,
+            pin_memory=True,
+        )
+
+        test_dataset = CIFAR10(
+            root=args.data_root, train=False, download=True, transform=test_transform
+        )
+        test_loader = torch.utils.data.DataLoader(
+            test_dataset,
+            batch_size=args.batch_size_test,
+            shuffle=False,
+            num_workers=args.workers,
+        )
+
+        best_acc1 = 0
+
+        model = convnet(num_classes=10)
+        model = model.to(device)
+
+        # Use the right distributed module wrapper if distributed training is enabled
+        if world_size > 1:
+            if not args.disable_dp:
+                if args.clip_per_layer:
+                    model = DDP(model, device_ids=[device])
+                else:
+                    model = DPDDP(model)
+            else:
+                model = DDP(model, device_ids=[device])
+
+        if args.optim == "SGD":
+            optimizer = optim.SGD(
+                model.parameters(),
+                lr=args.lr,
+                momentum=args.momentum,
+                weight_decay=args.weight_decay,
             )
-            raise ImportError(msg) from e
+        elif args.optim == "RMSprop":
+            optimizer = optim.RMSprop(model.parameters(), lr=args.lr)
+        elif args.optim == "Adam":
+            optimizer = optim.Adam(model.parameters(), lr=args.lr)
+        else:
+            raise NotImplementedError("Optimizer not recognized. Please check spelling")
 
-        generator = prng.create_random_device_generator("/dev/urandom")
-
-    else:
-        generator = None
-
-    augmentations = [
-        transforms.RandomCrop(32, padding=4),
-        transforms.RandomHorizontalFlip(),
-    ]
-    normalize = [
-        transforms.ToTensor(),
-        transforms.Normalize((0.4914, 0.4822, 0.4465), (0.2023, 0.1994, 0.2010)),
-    ]
-    train_transform = transforms.Compose(
-        augmentations + normalize if args.disable_dp else normalize
-    )
-
-    test_transform = transforms.Compose(normalize)
-
-    train_dataset = CIFAR10(
-        root=args.data_root, train=True, download=True, transform=train_transform
-    )
-
-    train_loader = torch.utils.data.DataLoader(
-        train_dataset,
-        batch_size=args.batch_size,
-        generator=generator,
-        num_workers=args.workers,
-        pin_memory=True,
-    )
-
-    test_dataset = CIFAR10(
-        root=args.data_root, train=False, download=True, transform=test_transform
-    )
-    test_loader = torch.utils.data.DataLoader(
-        test_dataset,
-        batch_size=args.batch_size_test,
-        shuffle=False,
-        num_workers=args.workers,
-    )
-
-    best_acc1 = 0
-
-    model = convnet(num_classes=10)
-    model = model.to(device)
-
-    # Use the right distributed module wrapper if distributed training is enabled
-    if world_size > 1:
+        privacy_engine = None
         if not args.disable_dp:
             if args.clip_per_layer:
-                model = DDP(model, device_ids=[device])
+                # Each layer has the same clipping threshold. The total grad norm is still bounded by `args.max_per_sample_grad_norm`.
+                n_layers = len(
+                    [(n, p) for n, p in model.named_parameters() if p.requires_grad]
+                )
+                max_grad_norm = [
+                    args.max_per_sample_grad_norm / np.sqrt(n_layers)
+                ] * n_layers
             else:
-                model = DPDDP(model)
-        else:
-            model = DDP(model, device_ids=[device])
+                max_grad_norm = args.max_per_sample_grad_norm
 
-    if args.optim == "SGD":
-        optimizer = optim.SGD(
-            model.parameters(),
-            lr=args.lr,
-            momentum=args.momentum,
-            weight_decay=args.weight_decay,
-        )
-    elif args.optim == "RMSprop":
-        optimizer = optim.RMSprop(model.parameters(), lr=args.lr)
-    elif args.optim == "Adam":
-        optimizer = optim.Adam(model.parameters(), lr=args.lr)
-    else:
-        raise NotImplementedError("Optimizer not recognized. Please check spelling")
-
-    privacy_engine = None
-    if not args.disable_dp:
-        if args.clip_per_layer:
-            # Each layer has the same clipping threshold. The total grad norm is still bounded by `args.max_per_sample_grad_norm`.
-            n_layers = len(
-                [(n, p) for n, p in model.named_parameters() if p.requires_grad]
+            privacy_engine = PrivacyEngine(
+                secure_mode=args.secure_rng,
             )
-            max_grad_norm = [
-                args.max_per_sample_grad_norm / np.sqrt(n_layers)
-            ] * n_layers
-        else:
-            max_grad_norm = args.max_per_sample_grad_norm
+            clipping = "per_layer" if args.clip_per_layer else "flat"
+            model, optimizer, train_loader = privacy_engine.make_private(
+                module=model,
+                optimizer=optimizer,
+                data_loader=train_loader,
+                noise_multiplier=args.sigma,
+                max_grad_norm=max_grad_norm,
+                clipping=clipping,
+                grad_sample_mode=args.grad_sample_mode,
+            )
 
-        privacy_engine = PrivacyEngine(
-            secure_mode=args.secure_rng,
-        )
-        clipping = "per_layer" if args.clip_per_layer else "flat"
-        model, optimizer, train_loader = privacy_engine.make_private(
-            module=model,
-            optimizer=optimizer,
-            data_loader=train_loader,
-            noise_multiplier=args.sigma,
-            max_grad_norm=max_grad_norm,
-            clipping=clipping,
-            grad_sample_mode=args.grad_sample_mode,
-        )
+        # Store some logs
+        accuracy_per_epoch = []
+        time_per_epoch = []
+        train_losses =[]
 
-    # Store some logs
-    accuracy_per_epoch = []
-    time_per_epoch = []
+        for epoch in range(args.start_epoch, args.epochs + 1):
+            if args.lr_schedule == "cos":
+                lr = args.lr * 0.5 * (1 + np.cos(np.pi * epoch / (args.epochs + 1)))
+                for param_group in optimizer.param_groups:
+                    param_group["lr"] = lr
 
-    for epoch in range(args.start_epoch, args.epochs + 1):
-        if args.lr_schedule == "cos":
-            lr = args.lr * 0.5 * (1 + np.cos(np.pi * epoch / (args.epochs + 1)))
-            for param_group in optimizer.param_groups:
-                param_group["lr"] = lr
+            losses, train_duration = train(
+                args, model, train_loader, optimizer, privacy_engine, epoch, device
+            )
+            top1_acc = test(args, model, test_loader, device)
+            train_loss = np.mean(losses)
+            train_losses.append(train_loss)
 
-        train_duration = train(
-            args, model, train_loader, optimizer, privacy_engine, epoch, device
-        )
-        top1_acc = test(args, model, test_loader, device)
+            # remember best acc@1 and save checkpoint
+            is_best = top1_acc > best_acc1
+            best_acc1 = max(top1_acc, best_acc1)
 
-        # remember best acc@1 and save checkpoint
-        is_best = top1_acc > best_acc1
-        best_acc1 = max(top1_acc, best_acc1)
+            time_per_epoch.append(train_duration)
+            accuracy_per_epoch.append(float(top1_acc))
 
-        time_per_epoch.append(train_duration)
-        accuracy_per_epoch.append(float(top1_acc))
+            save_checkpoint(
+                {
+                    "epoch": epoch + 1,
+                    "arch": "Convnet",
+                    "state_dict": model.state_dict(),
+                    "best_acc1": best_acc1,
+                    "optimizer": optimizer.state_dict(),
+                },
+                is_best,
+                filename=args.checkpoint_file + ".tar",
+            )
 
-        save_checkpoint(
-            {
-                "epoch": epoch + 1,
-                "arch": "Convnet",
-                "state_dict": model.state_dict(),
-                "best_acc1": best_acc1,
-                "optimizer": optimizer.state_dict(),
-            },
-            is_best,
-            filename=args.checkpoint_file + ".tar",
-        )
+        train_results['DP' if dp_mode else 'non-DP'] = (train_losses, accuracy_per_epoch)
+    
+    plot_combined_results(train_results, args.sigma, args.batch_size, args.seed)
 
     if rank == 0:
         time_per_epoch_seconds = [t.total_seconds() for t in time_per_epoch]

@@ -1,4 +1,7 @@
 
+``` python examples/cifar10.py --epochs 10 --sigma 1.1 --checkpoint-file "/home/zahid/work/d2p2/ckpt" --log-dir "/home/zahid/work/d2p2/log" --local_rank -1
+```
+
 ## Installation
 The latest release of Opacus can be installed via `pip`:
 ```bash
