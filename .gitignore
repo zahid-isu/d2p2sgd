@@ -4,6 +4,10 @@ cifar10/
 ckpt/
 log/
 webiste/
+blurnn/
+dynamic-dp/
+other/
+
 # Ignore .pth files
 *.pth
 *.tar

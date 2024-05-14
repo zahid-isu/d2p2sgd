@@ -39,6 +39,8 @@ from torch.nn.parallel import DistributedDataParallel as DDP
 from torchvision.datasets import CIFAR10
 from tqdm import tqdm
 import matplotlib.pyplot as plt
+import torch.profiler as profiler
+
 
 logging.basicConfig(
     format="%(asctime)s:%(levelname)s:%(message)s",
@@ -50,28 +52,31 @@ logger.setLevel(level=logging.INFO)
 
 
 def plot_combined_results(train_results, sigma, batch_size, seed):
-    train_losses_non_dp, accuracy_per_epoch_non_dp = train_results['non-DP']
-    train_losses_dp, accuracy_per_epoch_dp = train_results['DP']
+    train_losses_sgd, accuracy_per_epoch_sgd = train_results['SGD']
+    train_losses_dp_static, accuracy_per_epoch_dp_static = train_results['DP-SGD (static)']
+    train_losses_dp_dynamic, accuracy_per_epoch_dp_dynamic = train_results['DP-SGD (dynamic)']
 
-    epochs = range(1, len(train_losses_non_dp) + 1)
+    epochs = range(1, len(next(iter(train_results.values()))[0]) + 1)
     fig, axs = plt.subplots(2, figsize=(10, 10))
 
     # Plot training losses
-    axs[0].plot(epochs, train_losses_non_dp, label='Training Loss SGD', color='blue')
-    axs[0].plot(epochs, train_losses_dp, label='Training Loss DP-SGD', color='red')
+    axs[0].plot(epochs, train_losses_sgd, label='SGD', color='blue')
+    axs[0].plot(epochs, train_losses_dp_static, label='DP-SGD(static)', color='red')
+    axs[0].plot(epochs, train_losses_dp_dynamic, label='DP-SGD(dynamic)', color='green')
     axs[0].set_xlabel('Epochs')
     axs[0].set_ylabel('Training Loss')
-    axs[0].legend()
+    axs[0].legend(loc='upper right')
 
     # Plot testing accuracies
-    axs[1].plot(epochs, accuracy_per_epoch_non_dp, label='Testing Accuracy SGD', color='green')
-    axs[1].plot(epochs, accuracy_per_epoch_dp, label='Testing Accuracy DP-SGD', color='purple')
+    axs[1].plot(epochs, accuracy_per_epoch_sgd, label='SGD', color='blue')
+    axs[1].plot(epochs, accuracy_per_epoch_dp_static, label='DP-SGD(static)', color='red')
+    axs[1].plot(epochs, accuracy_per_epoch_dp_dynamic, label='DP-SGD(dynamic)', color='green')
     axs[1].set_xlabel('Epochs')
     axs[1].set_ylabel('Testing Accuracy')
-    axs[1].legend()
+    axs[1].legend(loc='upper left')
  
     fig.suptitle(f'CNN on Cifar10 dataset sigma_{sigma}_batch_{batch_size}_seed_{seed}')
-    plt.savefig(f'log/CNN_cifar/sgd_vs_dp-sgd_sigma_{sigma}_batch_{batch_size}_seed_{seed}.png')
+    plt.savefig(f'log/CNN_cifar/May_13_sgd_vs_dp-sgd_sigma_{sigma}_batch_{batch_size}_seed_{seed}.png')
 
 def setup(args):
     if not torch.cuda.is_available():
@@ -146,6 +151,7 @@ def convnet(num_classes):
 
 
 def save_checkpoint(state, is_best, filename="checkpoint.tar"):
+    
     torch.save(state, filename)
     if is_best:
         shutil.copyfile(filename, "model_best.pth.tar")
@@ -181,56 +187,61 @@ def train(args, model, train_loader, optimizer, privacy_engine, epoch, device):
         # Using model.parameters() instead of fparams
         # as fparams seems to not point to the dynamically updated parameters
         params = list(model.parameters())
+        
+    with tqdm(total=len(train_loader), desc=f"Epoch {epoch}") as pbar:
+        for i, (images, target) in enumerate(train_loader):
+            images = images.to(device)
+            target = target.to(device)
 
-    for i, (images, target) in enumerate(tqdm(train_loader)):
-        images = images.to(device)
-        target = target.to(device)
+            # compute output
+            output = model(images)
 
-        # compute output
-        output = model(images)
-
-        if args.grad_sample_mode == "no_op":
-            per_sample_grads, per_sample_losses = ft_compute_sample_grad(
-                params, images, target
-            )
-            per_sample_grads = [g.detach() for g in per_sample_grads]
-            loss = torch.mean(per_sample_losses)
-            for p, g in zip(params, per_sample_grads):
-                p.grad_sample = g
-        else:
-            loss = criterion(output, target)
-            preds = np.argmax(output.detach().cpu().numpy(), axis=1)
-            labels = target.detach().cpu().numpy()
-
-            # measure accuracy and record loss
-            acc1 = accuracy(preds, labels)
-            top1_acc.append(acc1)
-
-            # compute gradient and do SGD step
-            loss.backward()
-
-        losses.append(loss.item())
-
-        # make sure we take a step after processing the last mini-batch in the
-        # epoch to ensure we start the next epoch with a clean state
-        optimizer.step()
-        optimizer.zero_grad()
-
-        if i % args.print_freq == 0:
-            if not args.disable_dp:
-                epsilon = privacy_engine.accountant.get_epsilon(delta=args.delta)
-                print(
-                    f"\tTrain Epoch: {epoch} \t"
-                    f"Loss: {np.mean(losses):.6f} "
-                    f"Acc@1: {np.mean(top1_acc):.6f} "
-                    f"(ε = {epsilon:.2f}, δ = {args.delta})"
+            if args.grad_sample_mode == "no_op":
+                per_sample_grads, per_sample_losses = ft_compute_sample_grad(
+                    params, images, target
                 )
+                per_sample_grads = [g.detach() for g in per_sample_grads]
+                loss = torch.mean(per_sample_losses)
+                for p, g in zip(params, per_sample_grads):
+                    p.grad_sample = g
             else:
-                print(
-                    f"\tTrain Epoch: {epoch} \t"
-                    f"Loss: {np.mean(losses):.6f} "
-                    f"Acc@1: {np.mean(top1_acc):.6f} "
-                )
+                loss = criterion(output, target)
+                preds = np.argmax(output.detach().cpu().numpy(), axis=1)
+                labels = target.detach().cpu().numpy()
+
+                # measure accuracy and record loss
+                acc1 = accuracy(preds, labels)
+                top1_acc.append(acc1)
+
+                # compute gradient and do SGD step
+                optimizer.zero_grad()
+                loss.backward()
+                optimizer.step()
+
+            losses.append(loss.item())
+
+            # make sure we take a step after processing the last mini-batch in the
+            # epoch to ensure we start the next epoch with a clean state
+            
+            
+
+            if i % args.print_freq == 0:
+                if not args.disable_dp:
+                    epsilon = privacy_engine.accountant.get_epsilon(delta=args.delta)
+                    pbar.write(
+                        f"\tTrain Epoch: {epoch} \t"
+                        f"Loss: {np.mean(losses):.6f} "
+                        f"Acc@1: {np.mean(top1_acc):.6f} "
+                        f"(ε = {epsilon:.2f}, δ = {args.delta})"
+                    )
+                else:
+                    pbar.write(
+                        f"\tTrain Epoch: {epoch} \t"
+                        f"Loss: {np.mean(losses):.6f} "
+                        f"Acc@1: {np.mean(top1_acc):.6f} "
+                    )
+            pbar.update()
+
     train_duration = datetime.now() - start_time
     return losses, train_duration
 
@@ -241,8 +252,8 @@ def test(args, model, test_loader, device):
     losses = []
     top1_acc = []
 
-    with torch.no_grad():
-        for images, target in tqdm(test_loader):
+    with torch.no_grad(), tqdm(total=len(test_loader), desc="Testing") as pbar:
+        for images, target in (test_loader):
             images = images.to(device)
             target = target.to(device)
 
@@ -254,11 +265,37 @@ def test(args, model, test_loader, device):
 
             losses.append(loss.item())
             top1_acc.append(acc1)
+            pbar.update(1)
 
     top1_avg = np.mean(top1_acc)
 
     print(f"\tTest set:" f"Loss: {np.mean(losses):.6f} " f"Acc@1: {top1_avg :.6f} ")
     return np.mean(top1_acc)
+
+
+def update_privacy_engine(privacy_engine, model, optimizer, train_loader, args, current_epoch,max_grad_norm): 
+    
+    model.train()
+    if not privacy_engine: 
+        privacy_engine = PrivacyEngine(secure_mode=args.secure_rng)
+
+    if hasattr(optimizer, 'privacy_engine'):
+        print("Detach previous privacy engine settings")
+        optimizer.privacy_engine.detach()
+        
+    dynamic_sigma = args.sigma / current_epoch ** 0.25 # dynamic_sigma = sigma/sqrt(k)
+    print("dynamic sigma:", dynamic_sigma)
+    clipping = "per_layer" if args.clip_per_layer else "flat"
+    model, optimizer, train_loader = privacy_engine.make_private(
+        module=model,
+        optimizer=optimizer,
+        data_loader=train_loader,
+        noise_multiplier= dynamic_sigma,
+        max_grad_norm=max_grad_norm,
+        clipping=clipping,
+        grad_sample_mode=args.grad_sample_mode,
+        )
+    return privacy_engine, optimizer
 
 
 # flake8: noqa: C901
@@ -268,10 +305,11 @@ def main():
     if args.debug >= 1:
         logger.setLevel(level=logging.DEBUG)
 
-    train_results = {}  # Dictionary to hold training results for DP and non-DP
+    train_results = {}  #hold training results
 
-    for dp_mode in [True, False]: # vanilla-SGD and DP-SGD
-        args.disable_dp = dp_mode
+    for dp_mode in [None, 'static', 'dynamic']:  # [SGD, DP-SGD(static), DP-SGD(dynamic)]
+        args.disable_dp = (dp_mode is None)
+        dp_label = 'SGD' if dp_mode is None else f'DP-SGD ({dp_mode})'
 
         # Sets `world_size = 1` if you run on a single GPU with `args.local_rank = -1`
         if args.local_rank != -1 or args.device != "cpu":
@@ -281,6 +319,8 @@ def main():
             device = "cpu"
             rank = 0
             world_size = 1
+
+        print(f"----------- Training mode: {dp_label}, Device: {device}, args.disable_dp:", args.disable_dp)
 
         if args.secure_rng:
             try:
@@ -363,15 +403,11 @@ def main():
             raise NotImplementedError("Optimizer not recognized. Please check spelling")
 
         privacy_engine = None
-        if not args.disable_dp:
+        if not args.disable_dp: # DP-SGD both static and dynamic
             if args.clip_per_layer:
                 # Each layer has the same clipping threshold. The total grad norm is still bounded by `args.max_per_sample_grad_norm`.
-                n_layers = len(
-                    [(n, p) for n, p in model.named_parameters() if p.requires_grad]
-                )
-                max_grad_norm = [
-                    args.max_per_sample_grad_norm / np.sqrt(n_layers)
-                ] * n_layers
+                n_layers = len([(n, p) for n, p in model.named_parameters() if p.requires_grad])
+                max_grad_norm = [args.max_per_sample_grad_norm / np.sqrt(n_layers)] * n_layers
             else:
                 max_grad_norm = args.max_per_sample_grad_norm
 
@@ -383,26 +419,27 @@ def main():
                 module=model,
                 optimizer=optimizer,
                 data_loader=train_loader,
-                noise_multiplier=args.sigma,
+                noise_multiplier=args.sigma, # starting sigma for DP-dynamic = args.sigma/1
                 max_grad_norm=max_grad_norm,
                 clipping=clipping,
                 grad_sample_mode=args.grad_sample_mode,
             )
 
-        # Store some logs
+        # Store logs
         accuracy_per_epoch = []
         time_per_epoch = []
         train_losses =[]
 
-        for epoch in range(args.start_epoch, args.epochs + 1):
+        for epoch in range(args.start_epoch, args.epochs + 1):  #training loop
             if args.lr_schedule == "cos":
                 lr = args.lr * 0.5 * (1 + np.cos(np.pi * epoch / (args.epochs + 1)))
                 for param_group in optimizer.param_groups:
                     param_group["lr"] = lr
+            
+            if not args.disable_dp and dp_mode == 'dynamic':  # Update sigma each epoch for dynamic DP-SGD
+                privacy_engine, optimizer = update_privacy_engine(privacy_engine, model, optimizer, train_loader, args, epoch, max_grad_norm)
 
-            losses, train_duration = train(
-                args, model, train_loader, optimizer, privacy_engine, epoch, device
-            )
+            losses, train_duration = train(args, model, train_loader, optimizer, privacy_engine, epoch, device)
             top1_acc = test(args, model, test_loader, device)
             train_loss = np.mean(losses)
             train_losses.append(train_loss)
@@ -426,7 +463,8 @@ def main():
                 filename=args.checkpoint_file + ".tar",
             )
 
-        train_results['DP' if dp_mode else 'non-DP'] = (train_losses, accuracy_per_epoch)
+        train_results[dp_label] = (train_losses, accuracy_per_epoch)
+        print(train_results)
     
     plot_combined_results(train_results, args.sigma, args.batch_size, args.seed)
 
@@ -462,7 +500,7 @@ def parse_args():
     )
     parser.add_argument(
         "--epochs",
-        default=90,
+        default=10,
         type=int,
         metavar="N",
         help="number of total epochs to run",
@@ -486,7 +524,7 @@ def parse_args():
     )
     parser.add_argument(
         "--batch-size",
-        default=2000,
+        default=256,
         type=int,
         metavar="N",
         help="approximate bacth size",
@@ -541,7 +579,7 @@ def parse_args():
     parser.add_argument(
         "--sigma",
         type=float,
-        default=1.5,
+        default=0.5,
         metavar="S",
         help="Noise multiplier (default 1.0)",
     )
@@ -570,7 +608,7 @@ def parse_args():
     parser.add_argument(
         "--delta",
         type=float,
-        default=1e-5,
+        default=1e-3,
         metavar="D",
         help="Target delta (default: 1e-5)",
     )
@@ -604,7 +642,7 @@ def parse_args():
     )
 
     parser.add_argument(
-        "--device", type=str, default="cpu", help="Device on which to run the code."
+        "--device", type=str, default="gpu", help="Device on which to run the code."
     )
     parser.add_argument(
         "--local_rank",

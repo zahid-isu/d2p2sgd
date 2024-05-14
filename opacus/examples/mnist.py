@@ -28,6 +28,7 @@ import torch.optim as optim
 from opacus import PrivacyEngine
 from torchvision import datasets, transforms
 from tqdm import tqdm
+import matplotlib.pyplot as plt
 
 
 # Precomputed characteristics of the MNIST dataset
@@ -57,6 +58,30 @@ class SampleConvNet(nn.Module):
     def name(self):
         return "SampleConvNet"
 
+def plot_combined_results(train_results, sigma, batch_size):
+    train_losses_dp_static, accuracy_per_epoch_dp_static = train_results['DP-SGD(static)']
+    train_losses_dp_dynamic, accuracy_per_epoch_dp_dynamic = train_results['DP-SGD(dynamic)']
+
+    epochs = range(1, len(next(iter(train_results.values()))[0]) + 1)
+    fig, axs = plt.subplots(1, figsize=(10, 8))
+
+    # Plot training losses
+    axs[0].plot(epochs, train_losses_dp_static, label='DP-SGD(static)', color='red')
+    axs[0].plot(epochs, train_losses_dp_dynamic, label='DP-SGD(dynamic)', color='green')
+    axs[0].set_xlabel('Epochs')
+    axs[0].set_ylabel('Training Loss')
+    axs[0].legend(loc='upper right')
+
+    # Plot testing accuracies
+    axs[1].plot(epochs, accuracy_per_epoch_dp_static, label='DP-SGD(static)', color='red')
+    axs[1].plot(epochs, accuracy_per_epoch_dp_dynamic, label='DP-SGD(dynamic)', color='green')
+    axs[1].set_xlabel('Epochs')
+    axs[1].set_ylabel('Testing Accuracy')
+    axs[1].legend(loc='upper left')
+ 
+    # fig.suptitle(f'CNN on MNIST dataset sigma_{sigma}_batch_{batch_size}')
+    plt.savefig(f'/home/zahid/work/d2p2sgd/log/CNN_mnist/dp-sgd_sigma_{sigma}_batch_{batch_size}.png')
+
 
 def train(args, model, device, train_loader, optimizer, privacy_engine, epoch):
     model.train()
@@ -80,7 +105,7 @@ def train(args, model, device, train_loader, optimizer, privacy_engine, epoch):
         )
     else:
         print(f"Train Epoch: {epoch} \t Loss: {np.mean(losses):.6f}")
-
+    return losses
 
 def test(model, device, test_loader):
     model.eval()
@@ -109,6 +134,29 @@ def test(model, device, test_loader):
     )
     return correct / len(test_loader.dataset)
 
+def update_privacy_engine(privacy_engine, model, optimizer, train_loader, args, current_epoch, max_grad_norm): 
+    
+    model.train()
+    if not privacy_engine: 
+        privacy_engine = PrivacyEngine(secure_mode=args.secure_rng)
+
+    if hasattr(optimizer, 'privacy_engine'):
+        print("Detach previous privacy engine settings")
+        optimizer.privacy_engine.detach()
+        
+    dynamic_sigma = args.sigma / current_epoch ** 0.25 # dynamic_sigma = sigma/sqrt(k)
+    print("dynamic sigma:", dynamic_sigma)
+    clipping = "per_layer" if args.clip_per_layer else "flat"
+    model, optimizer, train_loader = privacy_engine.make_private(
+        module=model,
+        optimizer=optimizer,
+        data_loader=train_loader,
+        noise_multiplier= dynamic_sigma,
+        max_grad_norm=max_grad_norm,
+        clipping=clipping,
+        )
+    return privacy_engine, optimizer
+
 
 def main():
     # Training settings
@@ -120,7 +168,7 @@ def main():
         "-b",
         "--batch-size",
         type=int,
-        default=64,
+        default=256,
         metavar="B",
         help="Batch size",
     )
@@ -201,6 +249,12 @@ def main():
         help="Enable Secure RNG to have trustworthy privacy guarantees. Comes at a performance cost",
     )
     parser.add_argument(
+        "--clip_per_layer",
+        action="store_true",
+        default=False,
+        help="Use static per-layer clipping with the same clipping threshold for each layer. Necessary for DDP. If `False` (default), uses flat clipping.",
+    )
+    parser.add_argument(
         "--data-root",
         type=str,
         default="../mnist",
@@ -208,75 +262,107 @@ def main():
     )
     args = parser.parse_args()
     device = torch.device(args.device)
+    train_results = {} 
 
-    train_loader = torch.utils.data.DataLoader(
-        datasets.MNIST(
-            args.data_root,
-            train=True,
-            download=True,
-            transform=transforms.Compose(
-                [
-                    transforms.ToTensor(),
-                    transforms.Normalize((MNIST_MEAN,), (MNIST_STD,)),
-                ]
+    for dp_mode in ['static', 'dynamic']:  # [SGD, DP-SGD(static), DP-SGD(dynamic)]
+        args.disable_dp = (dp_mode is None)
+        dp_label = 'SGD' if dp_mode is None else f'DP-SGD({dp_mode})'
+        print(f"Running  for {dp_label}")
+
+        train_loader = torch.utils.data.DataLoader(
+            datasets.MNIST(
+                args.data_root,
+                train=True,
+                download=True,
+                transform=transforms.Compose(
+                    [
+                        transforms.ToTensor(),
+                        transforms.Normalize((MNIST_MEAN,), (MNIST_STD,)),
+                    ]
+                ),
             ),
-        ),
-        batch_size=args.batch_size,
-        num_workers=0,
-        pin_memory=True,
-    )
-    test_loader = torch.utils.data.DataLoader(
-        datasets.MNIST(
-            args.data_root,
-            train=False,
-            transform=transforms.Compose(
-                [
-                    transforms.ToTensor(),
-                    transforms.Normalize((MNIST_MEAN,), (MNIST_STD,)),
-                ]
-            ),
-        ),
-        batch_size=args.test_batch_size,
-        shuffle=True,
-        num_workers=0,
-        pin_memory=True,
-    )
-    run_results = []
-    for _ in range(args.n_runs):
-        model = SampleConvNet().to(device)
-
-        optimizer = optim.SGD(model.parameters(), lr=args.lr, momentum=0)
-        privacy_engine = None
-
-        if not args.disable_dp:
-            privacy_engine = PrivacyEngine(secure_mode=args.secure_rng)
-            model, optimizer, train_loader = privacy_engine.make_private(
-                module=model,
-                optimizer=optimizer,
-                data_loader=train_loader,
-                noise_multiplier=args.sigma,
-                max_grad_norm=args.max_per_sample_grad_norm,
-            )
-
-        for epoch in range(1, args.epochs + 1):
-            train(args, model, device, train_loader, optimizer, privacy_engine, epoch)
-        run_results.append(test(model, device, test_loader))
-
-    if len(run_results) > 1:
-        print(
-            "Accuracy averaged over {} runs: {:.2f}% ± {:.2f}%".format(
-                len(run_results), np.mean(run_results) * 100, np.std(run_results) * 100
-            )
+            batch_size=args.batch_size,
+            num_workers=0,
+            pin_memory=True,
         )
+        test_loader = torch.utils.data.DataLoader(
+            datasets.MNIST(
+                args.data_root,
+                train=False,
+                transform=transforms.Compose(
+                    [
+                        transforms.ToTensor(),
+                        transforms.Normalize((MNIST_MEAN,), (MNIST_STD,)),
+                    ]
+                ),
+            ),
+            batch_size=args.test_batch_size,
+            shuffle=True,
+            num_workers=0,
+            pin_memory=True,
+        )
+        run_results = []
+        for _ in range(args.n_runs):
+            model = SampleConvNet().to(device)
+            
 
-    repro_str = (
-        f"mnist_{args.lr}_{args.sigma}_"
-        f"{args.max_per_sample_grad_norm}_{args.batch_size}_{args.epochs}"
-    )
-    torch.save(run_results, f"run_results_{repro_str}.pt")
+            optimizer = optim.SGD(model.parameters(), lr=args.lr, momentum=0)
+            privacy_engine = None
 
-    if args.save_model:
-        torch.save(model.state_dict(), f"mnist_cnn_{repro_str}.pt")
+            if not args.disable_dp:
+                
+                if args.clip_per_layer:
+                # Each layer has the same clipping threshold. The total grad norm is still bounded by `args.max_per_sample_grad_norm`.
+                    n_layers = len([(n, p) for n, p in model.named_parameters() if p.requires_grad])
+                    max_grad_norm = [args.max_per_sample_grad_norm / np.sqrt(n_layers)] * n_layers
+                else:
+                    max_grad_norm = args.max_per_sample_grad_norm
+
+                privacy_engine = PrivacyEngine(
+                    secure_mode=args.secure_rng,
+                )
+                clipping = "per_layer" if args.clip_per_layer else "flat"
+            
+                model, optimizer, train_loader = privacy_engine.make_private(
+                    module=model,
+                    optimizer=optimizer,
+                    data_loader=train_loader,
+                    noise_multiplier=args.sigma,
+                    max_grad_norm=args.max_per_sample_grad_norm,
+                )
+            # Store logs
+            accuracy_per_epoch = []
+            train_losses =[]
+
+            for epoch in range(1, args.epochs + 1):
+
+                if not args.disable_dp and dp_mode == 'dynamic':  # Update sigma each epoch for dynamic DP-SGD
+                    privacy_engine, optimizer = update_privacy_engine(privacy_engine, model, optimizer, train_loader, args, epoch, max_grad_norm)
+                losses = train(args, model, device, train_loader, optimizer, privacy_engine, epoch)
+                top1_acc = test(model, device, test_loader)
+                train_loss = np.mean(losses)
+                accuracy_per_epoch.append(float(top1_acc))
+                train_losses.append(train_loss)
+            run_results.append(top1_acc)
+            train_results[dp_label] = (train_losses, accuracy_per_epoch)
+
+    plot_combined_results(train_results, args.sigma, args.batch_size)
+
+    # if len(run_results) > 1:
+    #     print(
+    #         "Accuracy averaged over {} runs: {:.2f}% ± {:.2f}%".format(
+    #             len(run_results), np.mean(run_results) * 100, np.std(run_results) * 100
+    #         )
+    #     )
+
+    # repro_str = (
+    #     f"mnist_{args.lr}_{args.sigma}_"
+    #     f"{args.max_per_sample_grad_norm}_{args.batch_size}_{args.epochs}"
+    # )
+    # torch.save(run_results, f"log/CNN_mnist/run_results_{repro_str}.pt")
+
+    # if args.save_model:
+    #     torch.save(model.state_dict(), f"log/CNN_mnist/mnist_cnn_{repro_str}.pt")
 
 
 if __name__ == "__main__":

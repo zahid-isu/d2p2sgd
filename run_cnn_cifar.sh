@@ -1,11 +1,11 @@
 #!/bin/bash
 
 # Define arrays of sigma values, batch sizes, and seeds
-sigmas=(0.5 1.0 1.5 2.0)
-batch_sizes=(128 256 512)
-seeds=(42 123 456)
+sigmas=(0.5 1.0 2.0)  #2.0 4.0 6.0 8.0 10.0
+batch_sizes=(512 1024) # 128 256
+seeds=(42) # 123 456
 
-epochs=50
+epochs=15
 checkpoint_base="/home/zahid/work/d2p2sgd/ckpt/CNN_cifar"
 log_base="/home/zahid/work/d2p2sgd/log/CNN_cifar"
 
@@ -18,7 +18,9 @@ do
             checkpoint_file="${checkpoint_base}/sigma_${sigma}_batch_${batch_size}_seed_${seed}"
             log_dir="${log_base}/sigma_${sigma}_batch_${batch_size}_seed_${seed}"
 
-            echo "Running with sigma: $sigma, batch size: $batch_size, seed: $seed"
+            echo "---------------------------------------------------------"
+            echo "  Sigma: $sigma, Batch size: $batch_size, Seed: $seed"
+            echo "---------------------------------------------------------"
 
             python opacus/examples/cifar10.py \
                 --epochs ${epochs} \
@@ -28,6 +30,7 @@ do
                 --local_rank -1 \
                 --device gpu \
                 --batch-size ${batch_size} \
+                --workers 2 \
                 --seed ${seed}
 
             # sleep 10s
