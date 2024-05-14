@@ -16,4 +16,7 @@ other/
 *.png
 *.jpg
 *.jpeg
+*.gz
+*.zip
+*.tar
 
