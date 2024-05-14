@@ -7,7 +7,7 @@ webiste/
 blurnn/
 dynamic-dp/
 other/
-
+mnist/
 # Ignore .pth files
 *.pth
 *.tar
