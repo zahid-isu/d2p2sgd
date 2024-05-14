@@ -8,6 +8,7 @@ blurnn/
 dynamic-dp/
 other/
 mnist/
+raw/
 # Ignore .pth files
 *.pth
 *.tar
