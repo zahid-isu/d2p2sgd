@@ -54,29 +54,30 @@ logger.setLevel(level=logging.INFO)
 
 
 def plot_combined_results(train_results, sigma, batch_size, seed):
-    train_losses_sgd, accuracy_per_epoch_sgd = train_results['SGD']
-    train_losses_dp_static, accuracy_per_epoch_dp_static = train_results['DP-SGD (static)']
+    # train_losses_sgd, accuracy_per_epoch_sgd = train_results['SGD']
+    # train_losses_dp_static, accuracy_per_epoch_dp_static = train_results['DP-SGD (static)']
     train_losses_dp_dynamic, accuracy_per_epoch_dp_dynamic = train_results['DP-SGD (dynamic)']
-    train_losses_dp_dynamic_rp, accuracy_per_epoch_dp_dynamic_rp = train_results['DP-SGD (RP)']
+    # train_losses_dp_dynamic_rp, accuracy_per_epoch_dp_dynamic_rp = train_results['DP-SGD (RP)']
+    train_losses_d2p2, accuracy_per_epoch_d2p2 = train_results['DP-SGD (d2p2)']
 
     epochs = range(1, len(next(iter(train_results.values()))[0]) + 1)
     fig, axs = plt.subplots(2, figsize=(10, 10))
 
     # Plot training losses
-    axs[0].plot(epochs, train_losses_sgd, label='SGD', color='blue')
-    axs[0].plot(epochs, train_losses_dp_static, label='DP-SGD(static)', color='red')
+    axs[0].plot(epochs, train_losses_d2p2, label='D2P2', color='blue')
+    # axs[0].plot(epochs, train_losses_dp_static, label='DP-SGD(static)', color='red')
     axs[0].plot(epochs, train_losses_dp_dynamic, label='DP-SGD(dynamic)', color='green')
-    axs[0].plot(epochs, train_losses_dp_dynamic_rp, label='DP-SGD(RP)', color='purple')
+    # axs[0].plot(epochs, train_losses_dp_dynamic_rp, label='DP-SGD(RP)', color='purple')
 
     axs[0].set_xlabel('Epochs')
     axs[0].set_ylabel('Training Loss')
     axs[0].legend(loc='upper right')
 
     # Plot testing accuracies
-    axs[1].plot(epochs, accuracy_per_epoch_sgd, label='SGD', color='blue')
-    axs[1].plot(epochs, accuracy_per_epoch_dp_static, label='DP-SGD(static)', color='red')
+    axs[1].plot(epochs, accuracy_per_epoch_d2p2, label='D2P2', color='blue')
+    # axs[1].plot(epochs, accuracy_per_epoch_dp_static, label='DP-SGD(static)', color='red')
     axs[1].plot(epochs, accuracy_per_epoch_dp_dynamic, label='DP-SGD(dynamic)', color='green')
-    axs[1].plot(epochs, accuracy_per_epoch_dp_dynamic_rp, label='DP-SGD(RP)', color='purple')
+    # axs[1].plot(epochs, accuracy_per_epoch_dp_dynamic_rp, label='DP-SGD(RP)', color='purple')
 
 
     axs[1].set_xlabel('Epochs')
@@ -240,7 +241,7 @@ def train(args, model, train_loader, optimizer, privacy_engine, epoch, device):
                         f"\tTrain Epoch: {epoch} \t"
                         f"Loss: {np.mean(losses):.6f} "
                         f"Acc@1: {np.mean(top1_acc):.6f} "
-                        f"(ε = {epsilon:.2f}, δ = {args.delta})"
+                        f"(ε = {epsilon:.5f}, δ = {args.delta})"
                     )
                 else:
                     pbar.write(
@@ -315,18 +316,23 @@ def main():
 
     train_results = {}  #hold training results
 
-    for dp_mode in ['RP']:  # [SGD, DP-SGD, D2P-SGD, DP2-SGD]
+    # for dp_mode in [ None, 'static', 'dynamic', 'RP', 'd2p2']:  # [SGD, DP-SGD, D2P-SGD, DP2-SGD]
+    for dp_mode in ['dynamic', 'd2p2']: 
         args.disable_dp = (dp_mode is None)
         dp_label = 'SGD' if dp_mode is None else f'DP-SGD ({dp_mode})'
-        random_projection = (dp_mode == 'RP')
+
+        random_projection = False
+        if dp_mode == 'RP' or dp_mode == 'd2p2':
+            random_projection = True 
         print("random_projection=", random_projection)
 
         # Sets `world_size = 1` if you run on a single GPU with `args.local_rank = -1`
         if args.local_rank != -1 or args.device != "cpu":
             rank, local_rank, world_size = setup(args)
-            device = local_rank
+            device = 0
         else:
             device = "cpu"
+            
             rank = 0
             world_size = 1
 
@@ -425,8 +431,6 @@ def main():
                 secure_mode=args.secure_rng,
             )
             clipping = "per_layer" if args.clip_per_layer else "flat"
-            random_projection = (dp_mode == 'RP')
-            print("random_projection=", random_projection)
 
             model, optimizer, train_loader = privacy_engine.make_private(
                 module=model,
@@ -436,7 +440,7 @@ def main():
                 max_grad_norm=max_grad_norm,
                 clipping=clipping,
                 grad_sample_mode=args.grad_sample_mode,
-                random_projection=random_projection
+                # random_projection=args.rp
             )
 
         # Store logs
@@ -450,13 +454,27 @@ def main():
                 for param_group in optimizer.param_groups:
                     param_group["lr"] = lr
             
-            if not args.disable_dp and dp_mode == 'dynamic':  # Update sigma each epoch for dynamic DP-SGD
+            if not args.disable_dp and dp_mode == 'dynamic':  # dynamic DP-SGD
                 # privacy_engine, optimizer = update_privacy_engine(privacy_engine, model, optimizer, train_loader, args, epoch, max_grad_norm)
                 new_noise_multiplier = args.sigma / (epoch ** 0.25)
                 privacy_engine.noise_multiplier = new_noise_multiplier
-                print(f"Epoch {epoch}: Updated sigma to {new_noise_multiplier:.4f}")
+                
 
+                print(f"Epoch {epoch}: Updated dynamic sigma to {new_noise_multiplier:.4f}")
+            
+            elif not args.disable_dp and dp_mode == 'RP':  # RP DP-SGD
+                privacy_engine.noise_multiplier = args.sigma
+                optimizer.random_projection = random_projection
+            
+            elif not args.disable_dp and dp_mode == 'd2p2':  # D2P2 DP-SGD
+                new_noise_multiplier = args.sigma / (epoch ** 0.25)
+                privacy_engine.noise_multiplier = new_noise_multiplier
+                optimizer.random_projection = random_projection
 
+                print(f"Epoch {epoch}: Updated d2p2 sigma to {new_noise_multiplier:.4f}")
+            
+            else:  # static DP-SGD
+                privacy_engine.noise_multiplier = args.sigma
 
             losses, train_duration = train(args, model, train_loader, optimizer, privacy_engine, epoch, device)
             top1_acc = test(args, model, test_loader, device)
@@ -517,6 +535,14 @@ def parse_args():
         metavar="N",
         help="number of data loading workers (default: 2)",
     )
+
+    parser.add_argument(
+        "--rp",
+        action="store_true",
+        default=False,
+        help="Random projection for DP",
+    )
+
     parser.add_argument(
         "--epochs",
         default=10,

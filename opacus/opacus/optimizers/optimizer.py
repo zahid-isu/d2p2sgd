@@ -429,15 +429,29 @@ class DPOptimizer(Optimizer):
     ) -> torch.Tensor:
         original_dim = gradient.shape[1]
         projection_matrix = torch.randn(original_dim, projection_dim).to(gradient.device) #Create projection matrix A_k
-        projected_grad = torch.matmul(gradient, projection_matrix) # Project the gradient
+        projected_grad = torch.matmul(gradient, projection_matrix)* (1 / torch.sqrt(torch.tensor(projection_dim, dtype=torch.float32, device=gradient.device))) # Project the gradient
+
+        print("Inside _random_projection")
+        # Check if the dimension matches
+        if projected_grad.shape[1] != projection_dim:
+            raise ValueError(f"Projected grad dim {projected_grad.shape[1]} doesn't match projection dim {projection_dim}")
+        
+        
+        assert projected_grad.shape[1] == projection_dim, f"Projected grad dim {projected_grad.shape[1]} doesn't match proj_mat dim {projection_dim}"
+
         noise = self._generate_noise(
             std=self.noise_multiplier,
             reference=projected_grad,
             generator=self.generator,
             secure_mode=self.secure_mode,
         )
+
+        print(" projected_grad.shape and noise.shape:", projected_grad.shape, noise.shape)
+
+        assert projected_grad.shape == noise.shape, f"Projected grad shape {projected_grad.shape} and noise shape {noise.shape} doesn't match"
         noisy_projected_grad = projected_grad + noise # Add noise to the projected gradient
-        return torch.matmul(noisy_projected_grad, projection_matrix.t()) # Map back to the original dimension
+        final_mat= torch.matmul(noisy_projected_grad, projection_matrix.t())
+        return noisy_projected_grad, final_mat # Map back to the original dimension
 
     def add_noise(self):
         """
@@ -449,8 +463,15 @@ class DPOptimizer(Optimizer):
 
             #Check RP 
             if self.random_projection:
+
+                print("self.random_projection=", self.random_projection)
                 projection_dim = p.summed_grad.shape[1] // 2  # 50% dim reduction
-                p.grad = self._random_projection(p.summed_grad, projection_dim).view_as(p)
+
+                noisy_projected_grad, final_mat = self._random_projection(p.summed_grad, projection_dim)
+
+                print('noisy_projected_grad', noisy_projected_grad.shape)
+                print('final_mat', final_mat.shape)
+                p.grad = final_mat.view_as(p)
             else:
                 noise = _generate_noise(
                     std=self.noise_multiplier * self.max_grad_norm,
