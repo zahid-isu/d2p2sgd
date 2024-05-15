@@ -204,6 +204,7 @@ class DPOptimizer(Optimizer):
         loss_reduction: str = "mean",
         generator=None,
         secure_mode: bool = False,
+        random_projection: bool = False,
     ):
         """
 
@@ -239,6 +240,7 @@ class DPOptimizer(Optimizer):
         self.step_hook = None
         self.generator = generator
         self.secure_mode = secure_mode
+        self.random_projection = random_projection
 
         self.param_groups = self.original_optimizer.param_groups
         self.defaults = self.original_optimizer.defaults
@@ -420,21 +422,43 @@ class DPOptimizer(Optimizer):
 
             _mark_as_processed(p.grad_sample)
 
+    def _random_projection(
+        self,
+        gradient: torch.Tensor,
+        projection_dim: int,
+    ) -> torch.Tensor:
+        original_dim = gradient.shape[1]
+        projection_matrix = torch.randn(original_dim, projection_dim).to(gradient.device) #Create projection matrix A_k
+        projected_grad = torch.matmul(gradient, projection_matrix) # Project the gradient
+        noise = self._generate_noise(
+            std=self.noise_multiplier,
+            reference=projected_grad,
+            generator=self.generator,
+            secure_mode=self.secure_mode,
+        )
+        noisy_projected_grad = projected_grad + noise # Add noise to the projected gradient
+        return torch.matmul(noisy_projected_grad, projection_matrix.t()) # Map back to the original dimension
+
     def add_noise(self):
         """
-        Adds noise to clipped gradients. Stores clipped and noised result in ``p.grad``
+        Adds noise and RP to clipped gradients. Stores clipped and noised result in ``p.grad``
         """
 
         for p in self.params:
             _check_processed_flag(p.summed_grad)
 
-            noise = _generate_noise(
-                std=self.noise_multiplier * self.max_grad_norm,
-                reference=p.summed_grad,
-                generator=self.generator,
-                secure_mode=self.secure_mode,
-            )
-            p.grad = (p.summed_grad + noise).view_as(p)
+            #Check RP 
+            if self.random_projection:
+                projection_dim = p.summed_grad.shape[1] // 2  # 50% dim reduction
+                p.grad = self._random_projection(p.summed_grad, projection_dim).view_as(p)
+            else:
+                noise = _generate_noise(
+                    std=self.noise_multiplier * self.max_grad_norm,
+                    reference=p.summed_grad,
+                    generator=self.generator,
+                    secure_mode=self.secure_mode,
+                )
+                p.grad = (p.summed_grad + noise).view_as(p)
 
             _mark_as_processed(p.summed_grad)
 

@@ -1,11 +1,11 @@
 #!/bin/bash
 
 # Define arrays of sigma values, batch sizes, and seeds
-sigmas=(0.5 1.0 2.0)  #2.0 4.0 6.0 8.0 10.0
-batch_sizes=(512 1024) # 128 256
-seeds=(42) # 123 456
+sigmas=(1.0)  #2.0 4.0 6.0 8.0 10.0
+batch_sizes=(256) # 128 256
+seeds=(12) # 123 456
 
-epochs=15
+epochs=1
 checkpoint_base="/home/zahid/work/d2p2sgd/ckpt/CNN_cifar"
 log_base="/home/zahid/work/d2p2sgd/log/CNN_cifar"
 
@@ -30,7 +30,7 @@ do
                 --local_rank -1 \
                 --device gpu \
                 --batch-size ${batch_size} \
-                --workers 2 \
+                --workers 8 \
                 --seed ${seed}
 
             # sleep 10s
