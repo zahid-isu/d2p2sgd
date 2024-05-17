@@ -314,7 +314,7 @@ def main():
     if args.debug >= 1:
         logger.setLevel(level=logging.DEBUG)
 
-    train_results = {}  #hold training results
+    train_results = {}  #store training results
 
     # for dp_mode in [ None, 'static', 'dynamic', 'RP', 'd2p2']:  # [SGD, DP-SGD, D2P-SGD, DP2-SGD]
     for dp_mode in ['static']: 
@@ -331,8 +331,8 @@ def main():
             rank, local_rank, world_size = setup(args)
             device = 0
         else:
-            device = "cpu"
-            
+            # device = "cpu"
+            device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
             rank = 0
             world_size = 1
 

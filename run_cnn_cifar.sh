@@ -6,8 +6,8 @@ batch_sizes=(512) # 128 256
 seeds=(12) # 123 456
 
 epochs=2
-checkpoint_base="/home/zahid/work/d2p2sgd/ckpt/CNN_cifar"
-log_base="/home/zahid/work/d2p2sgd/log/CNN_cifar"
+checkpoint_base="/home/zahid/work/d2p2/d2p2sgd/ckpt/CNN_cifar"
+log_base="/home/zahid/work/d2p2/d2p2sgd/log/CNN_cifar"
 
 for sigma in "${sigmas[@]}"
 do
@@ -22,13 +22,13 @@ do
             echo "  Sigma: $sigma, Batch size: $batch_size, Seed: $seed"
             echo "---------------------------------------------------------"
 
-            python ./opacus/examples/cifar10.py \
+            python cifar10.py \
                 --epochs ${epochs} \
                 --sigma ${sigma} \
                 --checkpoint-file "${checkpoint_file}" \
                 --log-dir "${log_dir}" \
                 --local_rank -1 \
-                --device cpu \
+                --device gpu \
                 --batch-size ${batch_size} \
                 --workers 1 \
                 --seed ${seed}

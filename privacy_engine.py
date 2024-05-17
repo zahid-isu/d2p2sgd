@@ -43,24 +43,17 @@ def get_optimizer_class(clipping: str, distributed: bool, grad_sample_mode: str 
 
         return DPOptimizer
     elif clipping == "flat" and distributed is True:
-        print("DPOptimizer picked111")
         return DistributedDPOptimizer
     elif clipping == "per_layer" and distributed is False:
-        print("DPOptimizer picked 222")
         return DPPerLayerOptimizer
     elif clipping == "per_layer" and distributed is True:
-        print("DPOptimizer picked 3333")
         if grad_sample_mode == "hooks":
-            print("DPOptimizer picked 444")
             return DistributedPerLayerOptimizer
         elif grad_sample_mode == "ew":
-            print("DPOptimizer picked 55")
             return SimpleDistributedPerLayerOptimizer
         else:
-            print("DPOptimizer picked 6666")
             raise ValueError(f"Unexpected grad_sample_mode: {grad_sample_mode}")
     elif clipping == "adaptive" and distributed is False:
-        print("DPOptimizer picked 777")
         return AdaClipDPOptimizer
     raise ValueError(
         f"Unexpected optimizer parameters. Clipping: {clipping}, distributed: {distributed}"
