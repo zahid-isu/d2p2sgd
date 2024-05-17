@@ -5,7 +5,7 @@ sigmas=(1.0)  #2.0 4.0 6.0 8.0 10.0
 batch_sizes=(512) # 128 256
 seeds=(12) # 123 456
 
-epochs=15
+epochs=2
 checkpoint_base="/home/zahid/work/d2p2sgd/ckpt/CNN_cifar"
 log_base="/home/zahid/work/d2p2sgd/log/CNN_cifar"
 

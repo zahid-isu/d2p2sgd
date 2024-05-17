@@ -317,7 +317,7 @@ def main():
     train_results = {}  #hold training results
 
     # for dp_mode in [ None, 'static', 'dynamic', 'RP', 'd2p2']:  # [SGD, DP-SGD, D2P-SGD, DP2-SGD]
-    for dp_mode in ['dynamic', 'd2p2']: 
+    for dp_mode in ['static']: 
         args.disable_dp = (dp_mode is None)
         dp_label = 'SGD' if dp_mode is None else f'DP-SGD ({dp_mode})'
 
@@ -440,8 +440,12 @@ def main():
                 max_grad_norm=max_grad_norm,
                 clipping=clipping,
                 grad_sample_mode=args.grad_sample_mode,
-                # random_projection=args.rp
+                # random_projection=random_projection
             )
+
+            print("optimizer", type(optimizer))
+            print("model", model)
+            print("train_loader", train_loader)
 
         # Store logs
         accuracy_per_epoch = []
@@ -464,17 +468,17 @@ def main():
             
             elif not args.disable_dp and dp_mode == 'RP':  # RP DP-SGD
                 privacy_engine.noise_multiplier = args.sigma
-                optimizer.random_projection = random_projection
+                privacy_engine.random_projection = random_projection
             
             elif not args.disable_dp and dp_mode == 'd2p2':  # D2P2 DP-SGD
                 new_noise_multiplier = args.sigma / (epoch ** 0.25)
                 privacy_engine.noise_multiplier = new_noise_multiplier
-                optimizer.random_projection = random_projection
+                privacy_engine.random_projection = random_projection
 
                 print(f"Epoch {epoch}: Updated d2p2 sigma to {new_noise_multiplier:.4f}")
             
-            else:  # static DP-SGD
-                privacy_engine.noise_multiplier = args.sigma
+            # else:  # static DP-SGD
+            #     privacy_engine.noise_multiplier = args.sigma
 
             losses, train_duration = train(args, model, train_loader, optimizer, privacy_engine, epoch, device)
             top1_acc = test(args, model, test_loader, device)
