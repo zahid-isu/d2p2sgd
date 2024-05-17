@@ -22,15 +22,15 @@ do
             echo "  Sigma: $sigma, Batch size: $batch_size, Seed: $seed"
             echo "---------------------------------------------------------"
 
-            python opacus/examples/cifar10.py \
+            python ./opacus/examples/cifar10.py \
                 --epochs ${epochs} \
                 --sigma ${sigma} \
                 --checkpoint-file "${checkpoint_file}" \
                 --log-dir "${log_dir}" \
                 --local_rank -1 \
-                --device gpu \
+                --device cpu \
                 --batch-size ${batch_size} \
-                --workers 8 \
+                --workers 1 \
                 --seed ${seed}
         
 

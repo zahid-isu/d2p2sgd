@@ -16,7 +16,6 @@
 """
 Runs CIFAR10 training with differential privacy.
 """
-
 import argparse
 import logging
 import os
@@ -25,22 +24,24 @@ import sys
 from datetime import datetime, timedelta
 
 import numpy as np
+
 import torch
 import torch.nn as nn
+
 import torch.optim as optim
 import torch.utils.data
-import torch.utils.data.distributed
+# import torch.utils.data.distributed
 import torchvision.transforms as transforms
-from opacus.privacy_engine import PrivacyEngine
+from privacy_engine import PrivacyEngine
 from opacus.distributed import DifferentiallyPrivateDistributedDataParallel as DPDDP
 from opacus.grad_sample.functorch import make_functional
 from torch.func import grad_and_value, vmap
-from torch.nn.parallel import DistributedDataParallel as DDP
+# from torch.nn.parallel import DistributedDataParallel as DDP
 from torchvision.datasets import CIFAR10
 from tqdm import tqdm
 import matplotlib.pyplot as plt
 import torch.profiler as profiler
-from opacus.optimizers import DPOptimizer
+from optimizer import DPOptimizer
 
 
 
@@ -310,7 +311,6 @@ def test(args, model, test_loader, device):
 # flake8: noqa: C901
 def main():
     args = parse_args()
-
     if args.debug >= 1:
         logger.setLevel(level=logging.DEBUG)
 
@@ -327,7 +327,7 @@ def main():
         print("random_projection=", random_projection)
 
         # Sets `world_size = 1` if you run on a single GPU with `args.local_rank = -1`
-        if args.local_rank != -1 or args.device != "cpu":
+        if args.local_rank != -1:
             rank, local_rank, world_size = setup(args)
             device = 0
         else:
