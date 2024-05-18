@@ -439,10 +439,9 @@ class DPOptimizer(Optimizer):
         projection_dim = original_dim // 2  # 50% reduction  13
 
         print(grad_shape, original_dim, projection_dim)
+        if 'proj_mat' not in self.state[p].keys():
+            self._initialize_proj_matrix(p, original_dim, projection_dim, gradient.device)
 
-        projection_matrix = torch.randn(original_dim, projection_dim).to(gradient.device) #Create projection matrix A_k
-
-        self._initialize_proj_matrix(p, original_dim, projection_dim, gradient.device)
         projection_matrix = self.state[p]['proj_mat']
 
         print(f">>>>>>>>>>>>>>> Proj matrix for param {p}: {projection_matrix}")
