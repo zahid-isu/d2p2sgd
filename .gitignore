@@ -22,3 +22,4 @@ raw/
 *.zip
 *.tar
 
+__pycache__/*
