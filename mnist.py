@@ -134,29 +134,6 @@ def test(model, device, test_loader):
     )
     return correct / len(test_loader.dataset)
 
-def update_privacy_engine(privacy_engine, model, optimizer, train_loader, args, current_epoch, max_grad_norm): 
-    
-    model.train()
-    if not privacy_engine: 
-        privacy_engine = PrivacyEngine(secure_mode=args.secure_rng)
-
-    if hasattr(optimizer, 'privacy_engine'):
-        print("Detach previous privacy engine settings")
-        optimizer.privacy_engine.detach()
-        
-    dynamic_sigma = args.sigma / current_epoch ** 0.25 # dynamic_sigma = sigma/sqrt(k)
-    print("dynamic sigma:", dynamic_sigma)
-    clipping = "per_layer" if args.clip_per_layer else "flat"
-    model, optimizer, train_loader = privacy_engine.make_private(
-        module=model,
-        optimizer=optimizer,
-        data_loader=train_loader,
-        noise_multiplier= dynamic_sigma,
-        max_grad_norm=max_grad_norm,
-        clipping=clipping,
-        )
-    return privacy_engine, optimizer
-
 
 def main():
     # Training settings

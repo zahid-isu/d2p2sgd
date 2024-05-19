@@ -283,31 +283,6 @@ def test(args, model, test_loader, device):
     return np.mean(top1_acc)
 
 
-# def update_privacy_engine(privacy_engine, model, optimizer, train_loader, args, current_epoch,max_grad_norm): 
-    
-#     model.train()
-#     if not privacy_engine: 
-#         privacy_engine = PrivacyEngine(secure_mode=args.secure_rng)
-
-#     if hasattr(optimizer, 'privacy_engine'):
-#         print("Detach previous privacy engine settings")
-#         optimizer.privacy_engine.detach()
-        
-#     dynamic_sigma = args.sigma / current_epoch ** 0.25 # dynamic_sigma = sigma/sqrt(k)
-#     print("dynamic sigma:", dynamic_sigma)
-#     clipping = "per_layer" if args.clip_per_layer else "flat"
-#     model, optimizer, train_loader = privacy_engine.make_private(
-#         module=model,
-#         optimizer=optimizer,
-#         data_loader=train_loader,
-#         noise_multiplier= dynamic_sigma,
-#         max_grad_norm=max_grad_norm,
-#         clipping=clipping,
-#         grad_sample_mode=args.grad_sample_mode,
-#         )
-#     return privacy_engine, optimizer
-
-
 # flake8: noqa: C901
 def main():
     args = parse_args()
@@ -317,14 +292,13 @@ def main():
     train_results = {}  #store training results
 
     # for dp_mode in [ None, 'static', 'dynamic', 'RP', 'd2p2']:  # [SGD, DP-SGD, D2P-SGD, DP2-SGD]
-    for dp_mode in ['static']: 
+    for dp_mode in ['d2p2']: 
         args.disable_dp = (dp_mode is None)
         dp_label = 'SGD' if dp_mode is None else f'DP-SGD ({dp_mode})'
 
         random_projection = False
         if dp_mode == 'RP' or dp_mode == 'd2p2':
             random_projection = True 
-        print("random_projection=", random_projection)
 
         # Sets `world_size = 1` if you run on a single GPU with `args.local_rank = -1`
         if args.local_rank != -1:
@@ -440,7 +414,7 @@ def main():
                 max_grad_norm=max_grad_norm,
                 clipping=clipping,
                 grad_sample_mode=args.grad_sample_mode,
-                # random_projection=random_projection
+                random_projection=random_projection
             )
 
             print("optimizer", type(optimizer))
@@ -458,13 +432,10 @@ def main():
                 for param_group in optimizer.param_groups:
                     param_group["lr"] = lr
             
-            if not args.disable_dp and dp_mode == 'dynamic':  # dynamic DP-SGD
-                # privacy_engine, optimizer = update_privacy_engine(privacy_engine, model, optimizer, train_loader, args, epoch, max_grad_norm)
+            elif not args.disable_dp and dp_mode == 'dynamic':  # dynamic DP-SGD
                 new_noise_multiplier = args.sigma / (epoch ** 0.25)
                 privacy_engine.noise_multiplier = new_noise_multiplier
                 
-
-                print(f"Epoch {epoch}: Updated dynamic sigma to {new_noise_multiplier:.4f}")
             
             elif not args.disable_dp and dp_mode == 'RP':  # RP DP-SGD
                 privacy_engine.noise_multiplier = args.sigma
@@ -475,7 +446,6 @@ def main():
                 privacy_engine.noise_multiplier = new_noise_multiplier
                 privacy_engine.random_projection = random_projection
 
-                print(f"Epoch {epoch}: Updated d2p2 sigma to {new_noise_multiplier:.4f}")
             
             # else:  # static DP-SGD
             #     privacy_engine.noise_multiplier = args.sigma
@@ -628,7 +598,7 @@ def parse_args():
     parser.add_argument(
         "--sigma",
         type=float,
-        default=0.5,
+        default=1.0,
         metavar="S",
         help="Noise multiplier (default 1.0)",
     )
@@ -636,7 +606,7 @@ def parse_args():
         "-c",
         "--max-per-sample-grad_norm",
         type=float,
-        default=10.0,
+        default=1.0,
         metavar="C",
         help="Clip per-sample gradients to this norm (default 1.0)",
     )

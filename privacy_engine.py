@@ -85,7 +85,7 @@ class PrivacyEngine:
         >>> # continue training as normal
     """
 
-    def __init__(self, *, accountant: str = "prv", secure_mode: bool = False):
+    def __init__(self, *, accountant: str = "prv", secure_mode: bool = False, random_projection: bool =False):
         """
 
         Args:
@@ -104,6 +104,7 @@ class PrivacyEngine:
         self.secure_mode = secure_mode
         self.secure_rng = None
         self.dataset = None  # only used to detect switching to a different dataset
+        self.random_projection = False
         if self.secure_mode:
             try:
                 import torchcsprng as csprng
@@ -301,7 +302,7 @@ class PrivacyEngine:
         clipping: str = "flat",
         noise_generator=None,
         grad_sample_mode: str = "hooks",
-        # random_projection: bool = True
+        random_projection: bool = False
     ) -> Tuple[GradSampleModule, DPOptimizer, DataLoader]:
         """
         Add privacy-related responsibilities to the main PyTorch training objects:
@@ -408,7 +409,7 @@ class PrivacyEngine:
             distributed=distributed,
             clipping=clipping,
             grad_sample_mode=grad_sample_mode,
-            random_projection=True,
+            random_projection=random_projection,
         )
 
         optimizer.attach_step_hook(
