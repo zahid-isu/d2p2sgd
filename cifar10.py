@@ -143,20 +143,20 @@ def cleanup():
 
 def convnet(num_classes):
     return nn.Sequential(
-        nn.Conv2d(3, 32, kernel_size=3, stride=1, padding=1),
+        nn.Conv2d(3, 16, kernel_size=3, stride=1, padding=1),
+        nn.ReLU(),
+        nn.AvgPool2d(kernel_size=2, stride=2),
+        nn.Conv2d(16, 32, kernel_size=3, stride=1, padding=1),
+        nn.ReLU(),
+        nn.AvgPool2d(kernel_size=2, stride=2),
+        nn.Conv2d(32, 32, kernel_size=3, stride=1, padding=1),
         nn.ReLU(),
         nn.AvgPool2d(kernel_size=2, stride=2),
         nn.Conv2d(32, 64, kernel_size=3, stride=1, padding=1),
         nn.ReLU(),
-        nn.AvgPool2d(kernel_size=2, stride=2),
-        nn.Conv2d(64, 64, kernel_size=3, stride=1, padding=1),
-        nn.ReLU(),
-        nn.AvgPool2d(kernel_size=2, stride=2),
-        nn.Conv2d(64, 128, kernel_size=3, stride=1, padding=1),
-        nn.ReLU(),
         nn.AdaptiveAvgPool2d((1, 1)),
         nn.Flatten(start_dim=1, end_dim=-1),
-        nn.Linear(128, num_classes, bias=True),
+        nn.Linear(64, num_classes, bias=True),
     )
 
 
@@ -309,7 +309,7 @@ def test(args, model, test_loader, device):
 
 
 # flake8: noqa: C901
-def main():
+def main(seed=1):
     args = parse_args()
     if args.debug >= 1:
         logger.setLevel(level=logging.DEBUG)
@@ -317,7 +317,7 @@ def main():
     train_results = {}  #store training results
 
     # for dp_mode in [ None, 'static', 'dynamic', 'RP', 'd2p2']:  # [SGD, DP-SGD, D2P-SGD, DP2-SGD]
-    for dp_mode in ['static']: 
+    for dp_mode in [None, "static", "dynamic", "RP", "d2p2"]: 
         args.disable_dp = (dp_mode is None)
         dp_label = 'SGD' if dp_mode is None else f'DP-SGD ({dp_mode})'
 
@@ -440,12 +440,9 @@ def main():
                 max_grad_norm=max_grad_norm,
                 clipping=clipping,
                 grad_sample_mode=args.grad_sample_mode,
-                # random_projection=random_projection
+                random_projection=random_projection,
+                seed=seed,
             )
-
-            print("optimizer", type(optimizer))
-            print("model", model)
-            print("train_loader", train_loader)
 
         # Store logs
         accuracy_per_epoch = []
@@ -461,19 +458,17 @@ def main():
             if not args.disable_dp and dp_mode == 'dynamic':  # dynamic DP-SGD
                 # privacy_engine, optimizer = update_privacy_engine(privacy_engine, model, optimizer, train_loader, args, epoch, max_grad_norm)
                 new_noise_multiplier = args.sigma / (epoch ** 0.25)
-                privacy_engine.noise_multiplier = new_noise_multiplier
+                optimizer.noise_multiplier = new_noise_multiplier
                 
 
                 print(f"Epoch {epoch}: Updated dynamic sigma to {new_noise_multiplier:.4f}")
             
             elif not args.disable_dp and dp_mode == 'RP':  # RP DP-SGD
-                privacy_engine.noise_multiplier = args.sigma
-                privacy_engine.random_projection = random_projection
+                optimizer.noise_multiplier = args.sigma
             
             elif not args.disable_dp and dp_mode == 'd2p2':  # D2P2 DP-SGD
                 new_noise_multiplier = args.sigma / (epoch ** 0.25)
-                privacy_engine.noise_multiplier = new_noise_multiplier
-                privacy_engine.random_projection = random_projection
+                optimizer.noise_multiplier = new_noise_multiplier
 
                 print(f"Epoch {epoch}: Updated d2p2 sigma to {new_noise_multiplier:.4f}")
             
@@ -549,7 +544,7 @@ def parse_args():
 
     parser.add_argument(
         "--epochs",
-        default=10,
+        default=2,
         type=int,
         metavar="N",
         help="number of total epochs to run",
@@ -564,7 +559,7 @@ def parse_args():
     parser.add_argument(
         "-b",
         "--batch-size-test",
-        default=256,
+        default=512,
         type=int,
         metavar="N",
         help="mini-batch size for test dataset (default: 256), this is the total "
@@ -573,7 +568,7 @@ def parse_args():
     )
     parser.add_argument(
         "--batch-size",
-        default=256,
+        default=512,
         type=int,
         metavar="N",
         help="approximate bacth size",
@@ -628,7 +623,7 @@ def parse_args():
     parser.add_argument(
         "--sigma",
         type=float,
-        default=0.5,
+        default=1.0,
         metavar="S",
         help="Noise multiplier (default 1.0)",
     )
@@ -636,7 +631,7 @@ def parse_args():
         "-c",
         "--max-per-sample-grad_norm",
         type=float,
-        default=10.0,
+        default=1.0,
         metavar="C",
         help="Clip per-sample gradients to this norm (default 1.0)",
     )
@@ -657,7 +652,7 @@ def parse_args():
     parser.add_argument(
         "--delta",
         type=float,
-        default=1e-3,
+        default=1e-5,
         metavar="D",
         help="Target delta (default: 1e-5)",
     )
