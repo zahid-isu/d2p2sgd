@@ -81,8 +81,11 @@ def plot_combined_results(train_results, sigma, batch_size, seed):
     axs[1].tick_params(axis='both', which='major', labelsize=14)
 
     current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-
+    save_dir = os.path.join('log','CNN_cifar')
+    if not os.path.exists(save_dir):
+        os.makedirs(save_dir)
     filename = f'log/CNN_cifar/{current_time}_sigma_{sigma}_batch_{batch_size}_seed_{seed}'
+
     fig.suptitle(f'CNN_CIFAR10_sigma_{sigma}_batch_{batch_size}', fontsize=16)
     plt.savefig(f"{filename}.png")
 
@@ -343,7 +346,7 @@ def main():
             device = 0
         else:
             # device = "cpu"
-            device = torch.device("cuda:1" if torch.cuda.is_available() else "cpu")
+            device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
             rank = 0
             world_size = 1
 
