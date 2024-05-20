@@ -331,7 +331,7 @@ def main():
     train_results = {}  #store training results
 
     # for dp_mode in [ None, 'static', 'dynamic', 'RP', 'd2p2']:  # [SGD, DP-SGD, D2P-SGD, DP2-SGD]
-    for dp_mode in [None, "static","dynamic", "RP", "d2p2"]: 
+    for dp_mode in [None, "static","dynamic", "RP", "d2p2"]:
         args.disable_dp = (dp_mode is None)
         dp_label = 'SGD' if dp_mode is None else f'DP-SGD ({dp_mode})'
 
@@ -442,7 +442,7 @@ def main():
                 max_grad_norm = args.max_per_sample_grad_norm
 
             privacy_engine = PrivacyEngine(
-                secure_mode=args.secure_rng,
+                secure_mode=args.secure_rng,red_rate=args.red_rate,
             )
             clipping = "per_layer" if args.clip_per_layer else "flat"
 
@@ -519,23 +519,23 @@ def main():
     
     plot_combined_results(train_results, args.sigma, args.batch_size, args.seed)
 
-    if rank == 0:
-        time_per_epoch_seconds = [t.total_seconds() for t in time_per_epoch]
-        avg_time_per_epoch = sum(time_per_epoch_seconds) / len(time_per_epoch_seconds)
-        metrics = {
-            "accuracy": best_acc1,
-            "accuracy_per_epoch": accuracy_per_epoch,
-            "avg_time_per_epoch_str": str(timedelta(seconds=int(avg_time_per_epoch))),
-            "time_per_epoch": time_per_epoch_seconds,
-        }
+    # if rank == 0:
+    #     time_per_epoch_seconds = [t.total_seconds() for t in time_per_epoch]
+    #     avg_time_per_epoch = sum(time_per_epoch_seconds) / len(time_per_epoch_seconds)
+    #     metrics = {
+    #         "accuracy": best_acc1,
+    #         "accuracy_per_epoch": accuracy_per_epoch,
+    #         "avg_time_per_epoch_str": str(timedelta(seconds=int(avg_time_per_epoch))),
+    #         "time_per_epoch": time_per_epoch_seconds,
+    #     }
 
-        logger.info(
-            "\nNote:\n- 'total_time' includes the data loading time, training time and testing time.\n- 'time_per_epoch' measures the training time only.\n"
-        )
-        logger.info(metrics)
+    #     logger.info(
+    #         "\nNote:\n- 'total_time' includes the data loading time, training time and testing time.\n- 'time_per_epoch' measures the training time only.\n"
+    #     )
+    #     logger.info(metrics)
 
-    if world_size > 1:
-        cleanup()
+    # if world_size > 1:
+    #     cleanup()
 
 
 def parse_args():
@@ -671,7 +671,12 @@ def parse_args():
         metavar="D",
         help="Target delta (default: 1e-5)",
     )
-
+    parser.add_argument(
+        "--red_rate",
+        type=float,
+        default=0.3,
+        help="random proj rate",
+    )
     parser.add_argument(
         "--checkpoint-file",
         type=str,

@@ -9,6 +9,7 @@ dynamic-dp/
 other/
 mnist/
 raw/
+run/
 
 # Ignore .pth files
 *.pth
@@ -22,5 +23,5 @@ raw/
 *.zip
 *.tar
 *.json
-
+*.out
 __pycache__/*

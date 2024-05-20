@@ -89,6 +89,7 @@ class PrivacyEngine:
         secure_mode: bool = False,
         random_projection: bool = False,
         seed: int = 1,
+        red_rate=0.3,
     ):
         """
 
@@ -109,6 +110,7 @@ class PrivacyEngine:
         self.secure_rng = None
         self.dataset = None  # only used to detect switching to a different dataset
         self.seed = seed
+        self.red_rate=red_rate
         if self.secure_mode:
             try:
                 import torchcsprng as csprng
@@ -141,6 +143,7 @@ class PrivacyEngine:
         grad_sample_mode="hooks",
         random_projection: bool = False,
         seed: int = 1,
+        red_rate=0.3,
     ) -> DPOptimizer:
         
         if isinstance(optimizer, DPOptimizer):
@@ -167,7 +170,7 @@ class PrivacyEngine:
             generator=generator,
             secure_mode=self.secure_mode,
             random_projection=random_projection,
-            seed=1,
+            seed=1, red_rate=self.red_rate,
         )
 
     def _prepare_data_loader(
@@ -310,6 +313,7 @@ class PrivacyEngine:
         grad_sample_mode: str = "hooks",
         random_projection: bool = False,
         seed: int = 1,
+        red_rate=0.3
     ) -> Tuple[GradSampleModule, DPOptimizer, DataLoader]:
         """
         Add privacy-related responsibilities to the main PyTorch training objects:
@@ -418,6 +422,7 @@ class PrivacyEngine:
             grad_sample_mode=grad_sample_mode,
             random_projection=random_projection,
             seed=seed,
+            red_rate=red_rate
         )
 
         optimizer.attach_step_hook(
