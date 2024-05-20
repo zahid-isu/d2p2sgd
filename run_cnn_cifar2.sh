@@ -1,35 +1,35 @@
 #!/bin/bash
 
 # Define arrays of sigma values, batch sizes, and seeds
-sigmas=(0.5 1.0)  #2.0 4.0 6.0 8.0 10.0
-batch_sizes=(512 1024) # 128 256
+sigmas=(1.0)  #2.0 4.0 6.0 8.0 10.0
+batch_sizes=(512) # 128 256
 seeds=(333) # 123 456
 
-epochs=15
-checkpoint_base="/home/zahid/work/d2p2sgd/ckpt/CNN_cifar"
-log_base="/home/zahid/work/d2p2sgd/log/CNN_cifar"
+epochs=30
+# checkpoint_base="/home/zahid/work/d2p2sgd/ckpt/CNN_cifar"
+# log_base="/home/zahid/work/d2p2sgd/log/CNN_cifar"
 
 # Function to run the script for a given combination of parameters
 run_script() {
     local sigma="$1"
     local batch_size="$2"
     local seed="$3"
-    local checkpoint_file="${checkpoint_base}/sigma_${sigma}_batch_${batch_size}_seed_${seed}"
-    local log_dir="${log_base}/sigma_${sigma}_batch_${batch_size}_seed_${seed}"
+    # local checkpoint_file="${checkpoint_base}/sigma_${sigma}_batch_${batch_size}_seed_${seed}"
+    # local log_dir="${log_base}/sigma_${sigma}_batch_${batch_size}_seed_${seed}"
 
     echo "---------------------------------------------------------"
     echo "  Sigma: $sigma, Batch size: $batch_size, Seed: $seed"
     echo "---------------------------------------------------------"
 
-    python opacus/examples/cifar10.py \
+    python mnist.py \
         --epochs ${epochs} \
         --sigma ${sigma} \
-        --checkpoint-file "${checkpoint_file}" \
-        --log-dir "${log_dir}" \
-        --local_rank -1 \
-        --device gpu \
+        # --checkpoint-file "${checkpoint_file}" \
+        # --log-dir "${log_dir}" \
+        # --local_rank -1 \
+        # --device gpu \
         --batch-size ${batch_size} \
-        --workers 2 \
+        # --workers 4 \
         --seed ${seed}
 }
 

@@ -14,7 +14,7 @@
 # limitations under the License.
 
 """
-Runs MNIST training with differential privacy.
+Runs KMNIST training with differential privacy.
 
 """
 
@@ -35,9 +35,10 @@ import matplotlib.pyplot as plt
 import time
 
 
+
 # Precomputed characteristics of the MNIST dataset
-MNIST_MEAN = 0.1307
-MNIST_STD = 0.3081
+KMNIST_MEAN = 0.5
+KMNIST_STD = 0.5
 
 
 class SampleConvNet(nn.Module):
@@ -68,7 +69,7 @@ def plot_combined_results(train_results, sigma, batch_size, seed):
     fig, axs = plt.subplots(2, figsize=(10, 10), dpi=400)
 
     # Plot training losses
-    for optim, (train_losses, accuracy_per_epoch, epsilons) in train_results.items():
+    for optim, (train_losses, accuracy_per_epoch, epsilons, duration) in train_results.items():
         epochs = range(1, len(train_losses) + 1)
         axs[0].plot(epochs, train_losses, label=f'{optim}', linewidth=2)
     
@@ -78,7 +79,7 @@ def plot_combined_results(train_results, sigma, batch_size, seed):
     axs[0].legend(loc='upper right', fontsize=12)
     
     # Plot testing accuracies
-    for optim, (train_losses, accuracy_per_epoch, epsilons) in train_results.items():
+    for optim, (train_losses, accuracy_per_epoch, epsilons, duration) in train_results.items():
         epochs = range(1, len(accuracy_per_epoch) + 1)
         axs[1].plot(epochs, accuracy_per_epoch, label=f'{optim}', linewidth=2)
     
@@ -88,13 +89,13 @@ def plot_combined_results(train_results, sigma, batch_size, seed):
 
     current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
-    filename = f'log/CNN_mnist/{current_time}_sigma_{sigma}_batch_{batch_size}_seed_{seed}'
-    fig.suptitle(f'CNN_MNIST_sigma_{sigma}_batch_{batch_size}', fontsize=16)
+    filename = f'log/CNN_kmnist/{current_time}_sigma_{sigma}_batch_{batch_size}_seed_{seed}'
+    fig.suptitle(f'CNN_KMNIST_sigma_{sigma}_batch_{batch_size}', fontsize=16)
     plt.savefig(f"{filename}.png")
     
 
     total_times_to_reach_accuracy = {}
-    target_accuracy=0.97
+    target_accuracy=0.80
 
     for dp_label, (train_losses, accuracy_per_epoch, epsilon, time_per_epoch) in train_results.items():
         total_time = 0
@@ -140,7 +141,7 @@ def train(args, model, device, train_loader, optimizer, privacy_engine, epoch):
     else:
         epsilon=0
         print(f"Train Epoch: {epoch} \t Loss: {np.mean(losses):.6f}")
-
+    
     train_duration = time.time()-start_time
     return losses, train_duration, epsilon
 
@@ -191,14 +192,14 @@ def main():
         print("random_projection=", random_projection)
 
         train_loader = torch.utils.data.DataLoader(
-            datasets.MNIST(
+            datasets.KMNIST(
                 args.data_root,
                 train=True,
                 download=True,
                 transform=transforms.Compose(
                     [
                         transforms.ToTensor(),
-                        transforms.Normalize((MNIST_MEAN,), (MNIST_STD,)),
+                        transforms.Normalize((KMNIST_MEAN,), (KMNIST_STD,)),
                     ]
                 ),
             ),
@@ -207,13 +208,13 @@ def main():
             pin_memory=True,
         )
         test_loader = torch.utils.data.DataLoader(
-            datasets.MNIST(
+            datasets.KMNIST(
                 args.data_root,
                 train=False,
                 transform=transforms.Compose(
                     [
                         transforms.ToTensor(),
-                        transforms.Normalize((MNIST_MEAN,), (MNIST_STD,)),
+                        transforms.Normalize((KMNIST_MEAN,), (KMNIST_STD,)),
                     ]
                 ),
             ),
@@ -317,7 +318,7 @@ def parse_args():
         "-n",
         "--epochs",
         type=int,
-        default=50,
+        default=1,
         metavar="N",
         help="number of epochs to train",
     )

@@ -442,7 +442,7 @@ class DPOptimizer(Optimizer):
         flattened_grad = torch.flatten(gradient)
         # flattened_grad = gradient.view(grad_shape[0], -1) # (32, 27) 
         original_dim = flattened_grad.shape[-1] # 27
-        projection_dim = original_dim // 2  # 50% reduction  13
+        projection_dim = int(0.3 * original_dim)  # 30% reduction  
         if 'proj_mat' not in self.state[p].keys():
             self._initialize_proj_matrix(p, original_dim, projection_dim, gradient.device)
 

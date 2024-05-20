@@ -22,6 +22,8 @@ import os
 import shutil
 import sys
 from datetime import datetime, timedelta
+import time
+import json
 
 import numpy as np
 
@@ -55,38 +57,54 @@ logger.setLevel(level=logging.INFO)
 
 
 def plot_combined_results(train_results, sigma, batch_size, seed):
-    # train_losses_sgd, accuracy_per_epoch_sgd = train_results['SGD']
-    # train_losses_dp_static, accuracy_per_epoch_dp_static = train_results['DP-SGD (static)']
-    train_losses_dp_dynamic, accuracy_per_epoch_dp_dynamic = train_results['DP-SGD (dynamic)']
-    # train_losses_dp_dynamic_rp, accuracy_per_epoch_dp_dynamic_rp = train_results['DP-SGD (RP)']
-    train_losses_d2p2, accuracy_per_epoch_d2p2 = train_results['DP-SGD (d2p2)']
 
-    epochs = range(1, len(next(iter(train_results.values()))[0]) + 1)
-    fig, axs = plt.subplots(2, figsize=(10, 10))
+    epochs = range(1, int(len(next(iter(train_results.values()))[0])) + 1)
+    fig, axs = plt.subplots(2, figsize=(10, 10), dpi=400)
 
     # Plot training losses
-    axs[0].plot(epochs, train_losses_d2p2, label='D2P2', color='blue')
-    # axs[0].plot(epochs, train_losses_dp_static, label='DP-SGD(static)', color='red')
-    axs[0].plot(epochs, train_losses_dp_dynamic, label='DP-SGD(dynamic)', color='green')
-    # axs[0].plot(epochs, train_losses_dp_dynamic_rp, label='DP-SGD(RP)', color='purple')
-
-    axs[0].set_xlabel('Epochs')
-    axs[0].set_ylabel('Training Loss')
-    axs[0].legend(loc='upper right')
-
+    for optim, (train_losses, accuracy_per_epoch, epsilons, train_duration) in train_results.items():
+        epochs = range(1, len(train_losses) + 1)
+        axs[0].plot(epochs, train_losses, label=f'{optim}', linewidth=2)
+    
+    axs[0].set_xlabel('Epoch', fontsize=16)
+    axs[0].set_ylabel('Training Loss', fontsize=16)
+    axs[0].tick_params(axis='both', which='major', labelsize=14)
+    axs[0].legend(loc='upper right', fontsize=12)
+    
     # Plot testing accuracies
-    axs[1].plot(epochs, accuracy_per_epoch_d2p2, label='D2P2', color='blue')
-    # axs[1].plot(epochs, accuracy_per_epoch_dp_static, label='DP-SGD(static)', color='red')
-    axs[1].plot(epochs, accuracy_per_epoch_dp_dynamic, label='DP-SGD(dynamic)', color='green')
-    # axs[1].plot(epochs, accuracy_per_epoch_dp_dynamic_rp, label='DP-SGD(RP)', color='purple')
+    for optim, (train_losses, accuracy_per_epoch, epsilons, train_duration) in train_results.items():
+        epochs = range(1, len(accuracy_per_epoch) + 1)
+        axs[1].plot(epochs, accuracy_per_epoch, label=f'{optim}', linewidth=2)
+    
+    axs[1].set_xlabel('Epoch', fontsize=16)
+    axs[1].set_ylabel('Testing Accuracy', fontsize=16)
+    axs[1].tick_params(axis='both', which='major', labelsize=14)
 
+    current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
-    axs[1].set_xlabel('Epochs')
-    axs[1].set_ylabel('Testing Accuracy')
-    axs[1].legend(loc='upper left')
- 
-    fig.suptitle(f'CNN on Cifar10 dataset sigma_{sigma}_batch_{batch_size}_seed_{seed}')
-    plt.savefig(f'log/CNN_cifar/May_15_sgd_vs_dp-sgd_sigma_{sigma}_batch_{batch_size}_seed_{seed}.png')
+    filename = f'log/CNN_cifar/{current_time}_sigma_{sigma}_batch_{batch_size}_seed_{seed}'
+    fig.suptitle(f'CNN_CIFAR10_sigma_{sigma}_batch_{batch_size}', fontsize=16)
+    plt.savefig(f"{filename}.png")
+
+    total_times_to_reach_accuracy = {}
+    target_accuracy=0.35
+
+    for dp_label, (train_losses, accuracy_per_epoch, epsilon, time_per_epoch) in train_results.items():
+        total_time = 0
+        for acc, epoch_time in zip(accuracy_per_epoch, time_per_epoch):
+            if acc >= target_accuracy:
+                total_times_to_reach_accuracy[dp_label] = total_time
+                break
+            total_time += epoch_time
+        else:
+            total_times_to_reach_accuracy[dp_label] = "t > train_time"
+    
+    with open(f"{filename}_time_comp.json", "w") as files:
+        json.dump(total_times_to_reach_accuracy, files, indent=4)
+
+    with open(f"{filename}.json", "w") as file:
+        json.dump(train_results, file, indent=4)
+    
 
 def setup(args):
     if not torch.cuda.is_available():
@@ -172,7 +190,7 @@ def accuracy(preds, labels):
 
 
 def train(args, model, train_loader, optimizer, privacy_engine, epoch, device):
-    start_time = datetime.now()
+    start_time = time.time()
 
     model.train()
     criterion = nn.CrossEntropyLoss()
@@ -235,8 +253,10 @@ def train(args, model, train_loader, optimizer, privacy_engine, epoch, device):
             
             
 
+            
             if i % args.print_freq == 0:
                 if not args.disable_dp:
+                    epsilon =0 
                     epsilon = privacy_engine.accountant.get_epsilon(delta=args.delta)
                     pbar.write(
                         f"\tTrain Epoch: {epoch} \t"
@@ -245,6 +265,7 @@ def train(args, model, train_loader, optimizer, privacy_engine, epoch, device):
                         f"(ε = {epsilon:.5f}, δ = {args.delta})"
                     )
                 else:
+                    epsilon =0 
                     pbar.write(
                         f"\tTrain Epoch: {epoch} \t"
                         f"Loss: {np.mean(losses):.6f} "
@@ -252,8 +273,8 @@ def train(args, model, train_loader, optimizer, privacy_engine, epoch, device):
                     )
             pbar.update()
 
-    train_duration = datetime.now() - start_time
-    return losses, train_duration
+    train_duration = time.time()-start_time
+    return losses, train_duration, epsilon
 
 
 def test(args, model, test_loader, device):
@@ -282,34 +303,24 @@ def test(args, model, test_loader, device):
     print(f"\tTest set:" f"Loss: {np.mean(losses):.6f} " f"Acc@1: {top1_avg :.6f} ")
     return np.mean(top1_acc)
 
+# def get_time_to_reach_accuracy(train_results, target_accuracy=0.97):
+#     total_times_to_reach_accuracy = {}
 
-# def update_privacy_engine(privacy_engine, model, optimizer, train_loader, args, current_epoch,max_grad_norm): 
+#     for dp_label, (train_losses, accuracy_per_epoch, epsilon, time_per_epoch) in train_results.items():
+#         total_time = 0
+#         for acc, epoch_time in zip(accuracy_per_epoch, time_per_epoch):
+#             if acc >= target_accuracy:
+#                 total_times_to_reach_accuracy[dp_label] = total_time
+#                 break
+#             total_time += epoch_time
+#         else:
+#             total_times_to_reach_accuracy[dp_label] = "t > train_time"
     
-#     model.train()
-#     if not privacy_engine: 
-#         privacy_engine = PrivacyEngine(secure_mode=args.secure_rng)
-
-#     if hasattr(optimizer, 'privacy_engine'):
-#         print("Detach previous privacy engine settings")
-#         optimizer.privacy_engine.detach()
-        
-#     dynamic_sigma = args.sigma / current_epoch ** 0.25 # dynamic_sigma = sigma/sqrt(k)
-#     print("dynamic sigma:", dynamic_sigma)
-#     clipping = "per_layer" if args.clip_per_layer else "flat"
-#     model, optimizer, train_loader = privacy_engine.make_private(
-#         module=model,
-#         optimizer=optimizer,
-#         data_loader=train_loader,
-#         noise_multiplier= dynamic_sigma,
-#         max_grad_norm=max_grad_norm,
-#         clipping=clipping,
-#         grad_sample_mode=args.grad_sample_mode,
-#         )
-#     return privacy_engine, optimizer
+#     return total_times_to_reach_accuracy
 
 
 # flake8: noqa: C901
-def main(seed=1):
+def main():
     args = parse_args()
     if args.debug >= 1:
         logger.setLevel(level=logging.DEBUG)
@@ -317,7 +328,7 @@ def main(seed=1):
     train_results = {}  #store training results
 
     # for dp_mode in [ None, 'static', 'dynamic', 'RP', 'd2p2']:  # [SGD, DP-SGD, D2P-SGD, DP2-SGD]
-    for dp_mode in [None, "static", "dynamic", "RP", "d2p2"]: 
+    for dp_mode in [None, "static","dynamic", "RP", "d2p2"]: 
         args.disable_dp = (dp_mode is None)
         dp_label = 'SGD' if dp_mode is None else f'DP-SGD ({dp_mode})'
 
@@ -332,7 +343,7 @@ def main(seed=1):
             device = 0
         else:
             # device = "cpu"
-            device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+            device = torch.device("cuda:1" if torch.cuda.is_available() else "cpu")
             rank = 0
             world_size = 1
 
@@ -441,13 +452,14 @@ def main(seed=1):
                 clipping=clipping,
                 grad_sample_mode=args.grad_sample_mode,
                 random_projection=random_projection,
-                seed=seed,
+                seed=args.seed,
             )
 
         # Store logs
         accuracy_per_epoch = []
         time_per_epoch = []
         train_losses =[]
+        epsilon_per_epoch = []
 
         for epoch in range(args.start_epoch, args.epochs + 1):  #training loop
             if args.lr_schedule == "cos":
@@ -456,7 +468,6 @@ def main(seed=1):
                     param_group["lr"] = lr
             
             if not args.disable_dp and dp_mode == 'dynamic':  # dynamic DP-SGD
-                # privacy_engine, optimizer = update_privacy_engine(privacy_engine, model, optimizer, train_loader, args, epoch, max_grad_norm)
                 new_noise_multiplier = args.sigma / (epoch ** 0.25)
                 optimizer.noise_multiplier = new_noise_multiplier
                 
@@ -475,7 +486,7 @@ def main(seed=1):
             # else:  # static DP-SGD
             #     privacy_engine.noise_multiplier = args.sigma
 
-            losses, train_duration = train(args, model, train_loader, optimizer, privacy_engine, epoch, device)
+            losses, train_duration, epsilon = train(args, model, train_loader, optimizer, privacy_engine, epoch, device)
             top1_acc = test(args, model, test_loader, device)
             train_loss = np.mean(losses)
             train_losses.append(train_loss)
@@ -486,20 +497,21 @@ def main(seed=1):
 
             time_per_epoch.append(train_duration)
             accuracy_per_epoch.append(float(top1_acc))
+            epsilon_per_epoch.append(epsilon)
 
-            save_checkpoint(
-                {
-                    "epoch": epoch + 1,
-                    "arch": "Convnet",
-                    "state_dict": model.state_dict(),
-                    "best_acc1": best_acc1,
-                    "optimizer": optimizer.state_dict(),
-                },
-                is_best,
-                filename=args.checkpoint_file + ".tar",
-            )
+            # save_checkpoint(
+            #     {
+            #         "epoch": epoch + 1,
+            #         "arch": "Convnet",
+            #         "state_dict": model.state_dict(),
+            #         "best_acc1": best_acc1,
+            #         "optimizer": optimizer.state_dict(),
+            #     },
+            #     is_best,
+            #     filename=args.checkpoint_file + ".tar",
+            # )
 
-        train_results[dp_label] = (train_losses, accuracy_per_epoch)
+        train_results[dp_label] = (train_losses, accuracy_per_epoch, epsilon_per_epoch, time_per_epoch)
         print(train_results)
     
     plot_combined_results(train_results, args.sigma, args.batch_size, args.seed)
@@ -686,7 +698,7 @@ def parse_args():
     )
 
     parser.add_argument(
-        "--device", type=str, default="gpu", help="Device on which to run the code."
+        "--device", type=str, default="cpu", help="Device on which to run the code."
     )
     parser.add_argument(
         "--local_rank",
