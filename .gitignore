@@ -9,7 +9,7 @@ dynamic-dp/
 other/
 mnist/
 raw/
-run/
+runs/
 
 # Ignore .pth files
 *.pth
