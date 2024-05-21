@@ -15,6 +15,7 @@ sigmas=(1.0 1.5 2.0 4.0 6.0)
 red_rates=(0.1 0.3 0.5 0.7 0.9)  #
 batch_sizes=(128 256 512 1024) # 
 seeds=(0 1 2 3 4) # 123 456
+dp_modes=("None" "static" "dynamic" "RP" "d2p2")
 i=0
 
 epochs=50
@@ -22,7 +23,7 @@ epochs=50
 # log_base="/home/zahid/work/d2p2/d2p2sgd/log/CNN_cifar"
 
 # Set the maximum number of concurrent scripts
-num_parallel=5
+num_parallel=20
 run_python=true
 # Process command-line arguments
 while [[ $# -gt 0 ]]; do
@@ -55,6 +56,10 @@ while [[ $# -gt 0 ]]; do
             run_python=$2
             shift 2
             ;;
+        --dp_modes)
+            dp_modes=$2
+            shift 2
+            ;;
         *)
             echo "Unknown option: $1"
             exit 1
@@ -83,13 +88,13 @@ do
                 # log_dir="${log_base}/sigma_${sigma}_batch_${batch_size}_seed_${seed}"
 
                 echo "---------------------------------------------------------"
-                echo "  Sigma: $sigma, Batch size: $batch_size, Seed: $seed Reduction Rate: $red_rate"
+                echo "  Sigma: $sigma, Batch size: $batch_size, Seed: $seed Reduction Rate: $red_rate DO Mode: $dp_modes"
                 echo "---------------------------------------------------------"
 
                 log_file="runs/train/log_sigma_${sigma}_batch_${batch_size}_seed_${seed}_rr_${red_rate}.txt"
 
                 if [ "$run_python" = true ]; then
-                python -u -m cifar10 --epochs="$epochs" --sigma="$sigma"  --red_rate="$red_rate" --local_rank=-1 --device gpu --batch-size="$batch_size" --workers=16 --seed "$seed"  2>&1 | tee "$log_file" &
+                python -u -m cifar10 --epochs="$epochs" --sigma="$sigma"  --red_rate="$red_rate" --local_rank=-1 --device gpu --batch-size="$batch_size" --workers=16 --seed "$seed" --dp_modes ${dp_modes[@]} 2>&1 | tee "$log_file" &
                 fi
                 
                 ((i++))

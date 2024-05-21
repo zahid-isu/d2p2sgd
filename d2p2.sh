@@ -15,4 +15,6 @@
 
 module load miniconda3
 source activate dimat 
-./run_cnn_cifar.sh
+./run_cnn_cifar.sh --num_parallel 12 --sigmas "1.0 1.5 2.0 4.0" --red_rates 0.3 --batch_sizes 512 --seeds "0 1 2" --epochs 50 --dp_modes "static dynamic"
+./run_cnn_cifar.sh --num_parallel 13 --sigmas "1.5 2.0 4.0" --red_rates "0.3 0.5 0.7" --batch_sizes 1024 --seeds "0 1 2" --epochs 50 --dp_modes "RP d2p2"
+./run_cnn_cifar.sh --num_parallel 18 --sigmas "1.0 1.5 2.0 4.0" --red_rates "0.3 0.5 0.7" --batch_sizes 512 --seeds "0 1 2" --epochs 50 --dp_modes "RP d2p2"

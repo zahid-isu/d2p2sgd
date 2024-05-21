@@ -56,7 +56,7 @@ logger = logging.getLogger("ddp")
 logger.setLevel(level=logging.INFO)
 
 
-def plot_combined_results(train_results, sigma, batch_size, seed):
+def plot_combined_results(train_results, sigma, batch_size, seed, red_rate):
 
     epochs = range(1, int(len(next(iter(train_results.values()))[0])) + 1)
     fig, axs = plt.subplots(2, figsize=(10, 10), dpi=400)
@@ -84,9 +84,9 @@ def plot_combined_results(train_results, sigma, batch_size, seed):
     save_dir = os.path.join('log','CNN_cifar')
     if not os.path.exists(save_dir):
         os.makedirs(save_dir)
-    filename = f'log/CNN_cifar/{current_time}_sigma_{sigma}_batch_{batch_size}_seed_{seed}'
+    filename = f'log/CNN_cifar/{current_time}_sigma_{sigma}_batch_{batch_size}_seed_{seed}_red_rate_{red_rate}'
 
-    fig.suptitle(f'CNN_CIFAR10_sigma_{sigma}_batch_{batch_size}', fontsize=16)
+    fig.suptitle(f'CNN_CIFAR10_sigma_{sigma}_batch_{batch_size}_red_rate_{red_rate}', fontsize=16)
     plt.savefig(f"{filename}.png")
 
     total_times_to_reach_accuracy = {}
@@ -331,7 +331,9 @@ def main():
     train_results = {}  #store training results
 
     # for dp_mode in [ None, 'static', 'dynamic', 'RP', 'd2p2']:  # [SGD, DP-SGD, D2P-SGD, DP2-SGD]
-    for dp_mode in [None, "static","dynamic", "RP", "d2p2"]:
+    dp_modes = [None if mode == "None" else mode for mode in args.dp_modes]
+    print(args.dp_modes)
+    for dp_mode in dp_modes:
         args.disable_dp = (dp_mode is None)
         dp_label = 'SGD' if dp_mode is None else f'DP-SGD ({dp_mode})'
 
@@ -517,7 +519,7 @@ def main():
         train_results[dp_label] = (train_losses, accuracy_per_epoch, epsilon_per_epoch, time_per_epoch)
         print(train_results)
     
-    plot_combined_results(train_results, args.sigma, args.batch_size, args.seed)
+    plot_combined_results(train_results, args.sigma, args.batch_size, args.seed, args.red_rate)
 
     # if rank == 0:
     #     time_per_epoch_seconds = [t.total_seconds() for t in time_per_epoch]
@@ -734,6 +736,8 @@ def parse_args():
         default=0,
         help="debug level (default: 0)",
     )
+    parser.add_argument('--dp_modes', nargs='+', help='DP mode')
+
 
     return parser.parse_args()
 
