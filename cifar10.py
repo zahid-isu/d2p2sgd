@@ -56,7 +56,7 @@ logger = logging.getLogger("ddp")
 logger.setLevel(level=logging.INFO)
 
 
-def plot_combined_results(train_results, sigma, batch_size, seed, red_rate):
+def plot_combined_results(train_results, sigma, batch_size, seed, red_rate, epochs):
 
     epochs = range(1, int(len(next(iter(train_results.values()))[0])) + 1)
     fig, axs = plt.subplots(2, figsize=(10, 10), dpi=400)
@@ -81,13 +81,14 @@ def plot_combined_results(train_results, sigma, batch_size, seed, red_rate):
     axs[1].tick_params(axis='both', which='major', labelsize=14)
 
     current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    save_dir = os.path.join('log','CNN_cifar')
+    save_dir = os.path.join('log','CNN_cifar', f'sigma_{sigma}', f'batch_{batch_size}', f'rr_{red_rate}',f'epo_{epochs}', f'seed_{seed}')
     if not os.path.exists(save_dir):
         os.makedirs(save_dir)
-    filename = f'log/CNN_cifar/{current_time}_sigma_{sigma}_batch_{batch_size}_seed_{seed}_red_rate_{red_rate}'
+    # filename = f'log/CNN_cifar/{current_time}_sigma_{sigma}_batch_{batch_size}_seed_{seed}_red_rate_{red_rate}'
 
-    fig.suptitle(f'CNN_CIFAR10_sigma_{sigma}_batch_{batch_size}_red_rate_{red_rate}', fontsize=16)
-    plt.savefig(f"{filename}.png")
+    # fig.suptitle(f'CNN_CIFAR10_sigma_{sigma}_batch_{batch_size}_red_rate_{red_rate}', fontsize=16)
+    file_name = "plot.png"
+    plt.savefig(save_dir, "plot.png")
 
     total_times_to_reach_accuracy = {}
     target_accuracy=0.35
@@ -101,11 +102,11 @@ def plot_combined_results(train_results, sigma, batch_size, seed, red_rate):
             total_time += epoch_time
         else:
             total_times_to_reach_accuracy[dp_label] = "t > train_time"
-    
-    with open(f"{filename}_time_comp.json", "w") as files:
+    json_file_path = os.path.join(save_dir, "time_comp.json")
+    with open(json_file_path, "w") as files:
         json.dump(total_times_to_reach_accuracy, files, indent=4)
-
-    with open(f"{filename}.json", "w") as file:
+    json_file_path = os.path.join(save_dir, "acc_loss.json")
+    with open(json_file_path, "w") as file:
         json.dump(train_results, file, indent=4)
     
 
@@ -519,7 +520,7 @@ def main():
         train_results[dp_label] = (train_losses, accuracy_per_epoch, epsilon_per_epoch, time_per_epoch)
         print(train_results)
     
-    plot_combined_results(train_results, args.sigma, args.batch_size, args.seed, args.red_rate)
+    plot_combined_results(train_results, args.sigma, args.batch_size, args.seed, args.red_rate, args.epochs)
 
     # if rank == 0:
     #     time_per_epoch_seconds = [t.total_seconds() for t in time_per_epoch]
@@ -736,7 +737,7 @@ def parse_args():
         default=0,
         help="debug level (default: 0)",
     )
-    parser.add_argument('--dp_modes', nargs='+', help='DP mode')
+    parser.add_argument('--dp_modes', nargs='+', help='DP mode', default=["None", "static", "dynamic", "RP", "d2p2"])
 
 
     return parser.parse_args()
