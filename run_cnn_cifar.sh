@@ -6,8 +6,6 @@ batch_sizes=(512) # 128 256
 seeds=(12) # 123 456
 
 epochs=2
-checkpoint_base="/home/zahid/work/d2p2/d2p2sgd/ckpt/CNN_cifar"
-log_base="/home/zahid/work/d2p2/d2p2sgd/log/CNN_cifar"
 
 for sigma in "${sigmas[@]}"
 do
