@@ -15,7 +15,7 @@ sigmas=(1.0 1.5 2.0 4.0 6.0)
 red_rates=(0.1 0.3 0.5 0.7 0.9)  #
 batch_sizes=(128 256 512 1024) # 
 seeds=(0 1 2 3 4) # 123 456
-dp_modes=("None" "static" "dynamic" "RP" "d2p2")
+dp_modes=()
 i=0
 
 epochs=50
@@ -75,7 +75,7 @@ echo "batch_sizes: ${batch_sizes[@]}"
 echo "epochs: ${epochs[@]}"
 echo "seed: ${seeds[@]}"
 echo "num_parallel: $num_parallel"
-
+echo "DP mode: ${dp_modes[@]}"
 for sigma in "${sigmas[@]}"
 do
     for red_rate in "${red_rates[@]}" 
