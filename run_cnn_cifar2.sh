@@ -6,8 +6,6 @@ batch_sizes=(512 1024) # 128 256
 seeds=(333) # 123 456
 
 epochs=15
-checkpoint_base="/home/zahid/work/d2p2sgd/ckpt/CNN_cifar"
-log_base="/home/zahid/work/d2p2sgd/log/CNN_cifar"
 
 # Function to run the script for a given combination of parameters
 run_script() {
