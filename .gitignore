@@ -22,5 +22,6 @@ raw/
 *.zip
 *.tar
 *.json
+*.pdf
 
 __pycache__/*

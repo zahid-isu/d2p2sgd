@@ -209,6 +209,7 @@ class DPOptimizer(Optimizer):
         secure_mode: bool = False,
         random_projection: bool = False,
         seed: int = 1,
+        red_rate : float =0.3,
     ):
         """
 
@@ -246,6 +247,7 @@ class DPOptimizer(Optimizer):
         self.secure_mode = secure_mode
         self.random_projection = random_projection
         self.seed = seed
+        self.red_rate = red_rate
 
         self.param_groups = self.original_optimizer.param_groups
         self.defaults = self.original_optimizer.defaults
@@ -436,13 +438,14 @@ class DPOptimizer(Optimizer):
             _mark_as_processed(p.grad_sample)
 
 
-    def _random_projection(self, gradient: torch.Tensor, p) -> torch.Tensor:
-    
+    def _random_projection(self, gradient: torch.Tensor, p, red_rate = 0.3) -> torch.Tensor:
+        
+        print("red_rate", red_rate)
         grad_shape = gradient.shape # (32,3,3,3)
         flattened_grad = torch.flatten(gradient)
         # flattened_grad = gradient.view(grad_shape[0], -1) # (32, 27) 
         original_dim = flattened_grad.shape[-1] # 27
-        projection_dim = int(0.3 * original_dim)  # 30% reduction  
+        projection_dim = int(red_rate* original_dim)  # red_rate = 30% reduction  
         if 'proj_mat' not in self.state[p].keys():
             self._initialize_proj_matrix(p, original_dim, projection_dim, gradient.device)
 
@@ -483,7 +486,7 @@ class DPOptimizer(Optimizer):
 
             #Check RP 
             if self.random_projection:
-                noisy_projected_grad, final_mat = self._random_projection(p.summed_grad, p)
+                noisy_projected_grad, final_mat = self._random_projection(p.summed_grad, p, red_rate=self.red_rate)
                 p.grad = final_mat.view_as(p)
             else:
                 noise = _generate_noise(

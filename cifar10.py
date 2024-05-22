@@ -58,13 +58,12 @@ logger.setLevel(level=logging.INFO)
 
 def plot_combined_results(train_results, sigma, batch_size, seed):
 
-    epochs = range(1, int(len(next(iter(train_results.values()))[0])) + 1)
     fig, axs = plt.subplots(2, figsize=(10, 10), dpi=400)
 
     # Plot training losses
-    for optim, (train_losses, accuracy_per_epoch, epsilons, train_duration) in train_results.items():
-        epochs = range(1, len(train_losses) + 1)
-        axs[0].plot(epochs, train_losses, label=f'{optim}', linewidth=2)
+    for optim, result in train_results.items():
+        epochs = range(1, len(result['loss']) + 1)
+        axs[0].plot(epochs, result['loss'], label=f'{optim}', linewidth=2)
     
     axs[0].set_xlabel('Epoch', fontsize=16)
     axs[0].set_ylabel('Training Loss', fontsize=16)
@@ -72,9 +71,9 @@ def plot_combined_results(train_results, sigma, batch_size, seed):
     axs[0].legend(loc='upper right', fontsize=12)
     
     # Plot testing accuracies
-    for optim, (train_losses, accuracy_per_epoch, epsilons, train_duration) in train_results.items():
-        epochs = range(1, len(accuracy_per_epoch) + 1)
-        axs[1].plot(epochs, accuracy_per_epoch, label=f'{optim}', linewidth=2)
+    for optim, result in train_results.items():
+        epochs = range(1, len(result['acc']) + 1)
+        axs[1].plot(epochs, result['acc'], label=f'{optim}', linewidth=2)
     
     axs[1].set_xlabel('Epoch', fontsize=16)
     axs[1].set_ylabel('Testing Accuracy', fontsize=16)
@@ -82,26 +81,10 @@ def plot_combined_results(train_results, sigma, batch_size, seed):
 
     current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
-    filename = f'log/CNN_cifar/{current_time}_sigma_{sigma}_batch_{batch_size}_seed_{seed}'
-    fig.suptitle(f'CNN_CIFAR10_sigma_{sigma}_batch_{batch_size}', fontsize=16)
+    filename = f'log/CNN_cifar/P200_red30_{current_time}_sigma_{sigma}_batch_{batch_size}_seed_{seed}'
+    fig.suptitle(f'CNN_CIFAR_sigma_{sigma}_batch_{batch_size}', fontsize=16)
     plt.savefig(f"{filename}.png")
-
-    total_times_to_reach_accuracy = {}
-    target_accuracy=0.35
-
-    for dp_label, (train_losses, accuracy_per_epoch, epsilon, time_per_epoch) in train_results.items():
-        total_time = 0
-        for acc, epoch_time in zip(accuracy_per_epoch, time_per_epoch):
-            if acc >= target_accuracy:
-                total_times_to_reach_accuracy[dp_label] = total_time
-                break
-            total_time += epoch_time
-        else:
-            total_times_to_reach_accuracy[dp_label] = "t > train_time"
     
-    with open(f"{filename}_time_comp.json", "w") as files:
-        json.dump(total_times_to_reach_accuracy, files, indent=4)
-
     with open(f"{filename}.json", "w") as file:
         json.dump(train_results, file, indent=4)
     
@@ -189,8 +172,7 @@ def accuracy(preds, labels):
     return (preds == labels).mean()
 
 
-def train(args, model, train_loader, optimizer, privacy_engine, epoch, device):
-    start_time = time.time()
+def train(args, model, train_loader, optimizer,dp_mode, privacy_engine, epoch, device):
 
     model.train()
     criterion = nn.CrossEntropyLoss()
@@ -273,8 +255,11 @@ def train(args, model, train_loader, optimizer, privacy_engine, epoch, device):
                     )
             pbar.update()
 
-    train_duration = time.time()-start_time
-    return losses, train_duration, epsilon
+    if dp_mode =="dynamic" or dp_mode =="d2p2":
+        return losses, optimizer.noise_multiplier, epsilon
+    else:
+        return losses, args.sigma, epsilon
+        
 
 
 def test(args, model, test_loader, device):
@@ -303,20 +288,6 @@ def test(args, model, test_loader, device):
     print(f"\tTest set:" f"Loss: {np.mean(losses):.6f} " f"Acc@1: {top1_avg :.6f} ")
     return np.mean(top1_acc)
 
-# def get_time_to_reach_accuracy(train_results, target_accuracy=0.97):
-#     total_times_to_reach_accuracy = {}
-
-#     for dp_label, (train_losses, accuracy_per_epoch, epsilon, time_per_epoch) in train_results.items():
-#         total_time = 0
-#         for acc, epoch_time in zip(accuracy_per_epoch, time_per_epoch):
-#             if acc >= target_accuracy:
-#                 total_times_to_reach_accuracy[dp_label] = total_time
-#                 break
-#             total_time += epoch_time
-#         else:
-#             total_times_to_reach_accuracy[dp_label] = "t > train_time"
-    
-#     return total_times_to_reach_accuracy
 
 
 # flake8: noqa: C901
@@ -328,13 +299,15 @@ def main():
     train_results = {}  #store training results
 
     # for dp_mode in [ None, 'static', 'dynamic', 'RP', 'd2p2']:  # [SGD, DP-SGD, D2P-SGD, DP2-SGD]
-    for dp_mode in [None, "static","dynamic", "RP", "d2p2"]: 
+    for dp_mode in [None, "static", "dynamic", "RP","d2p2"]: 
         args.disable_dp = (dp_mode is None)
         dp_label = 'SGD' if dp_mode is None else f'DP-SGD ({dp_mode})'
 
         random_projection = False
         if dp_mode == 'RP' or dp_mode == 'd2p2':
             random_projection = True 
+        else:
+            random_projection = False
         print("random_projection=", random_projection)
 
         # Sets `world_size = 1` if you run on a single GPU with `args.local_rank = -1`
@@ -457,9 +430,9 @@ def main():
 
         # Store logs
         accuracy_per_epoch = []
-        time_per_epoch = []
         train_losses =[]
         epsilon_per_epoch = []
+        sigma_per_epoch =[]
 
         for epoch in range(args.start_epoch, args.epochs + 1):  #training loop
             if args.lr_schedule == "cos":
@@ -486,53 +459,31 @@ def main():
             # else:  # static DP-SGD
             #     privacy_engine.noise_multiplier = args.sigma
 
-            losses, train_duration, epsilon = train(args, model, train_loader, optimizer, privacy_engine, epoch, device)
+            losses, sigma, epsilon = train(args, model, train_loader, optimizer, dp_mode, privacy_engine, epoch, device)
             top1_acc = test(args, model, test_loader, device)
             train_loss = np.mean(losses)
             train_losses.append(train_loss)
+            sigma_per_epoch.append(sigma)
+
 
             # remember best acc@1 and save checkpoint
             is_best = top1_acc > best_acc1
             best_acc1 = max(top1_acc, best_acc1)
 
-            time_per_epoch.append(train_duration)
             accuracy_per_epoch.append(float(top1_acc))
             epsilon_per_epoch.append(epsilon)
+            # run_results.append(top1_acc)
+            train_results[dp_label] = {
+                'loss': train_losses,
+                'acc': accuracy_per_epoch,
+                'ep': epsilon_per_epoch,
+                'sigma':sigma_per_epoch
+            }
 
-            # save_checkpoint(
-            #     {
-            #         "epoch": epoch + 1,
-            #         "arch": "Convnet",
-            #         "state_dict": model.state_dict(),
-            #         "best_acc1": best_acc1,
-            #         "optimizer": optimizer.state_dict(),
-            #     },
-            #     is_best,
-            #     filename=args.checkpoint_file + ".tar",
-            # )
-
-        train_results[dp_label] = (train_losses, accuracy_per_epoch, epsilon_per_epoch, time_per_epoch)
         print(train_results)
     
     plot_combined_results(train_results, args.sigma, args.batch_size, args.seed)
 
-    if rank == 0:
-        time_per_epoch_seconds = [t.total_seconds() for t in time_per_epoch]
-        avg_time_per_epoch = sum(time_per_epoch_seconds) / len(time_per_epoch_seconds)
-        metrics = {
-            "accuracy": best_acc1,
-            "accuracy_per_epoch": accuracy_per_epoch,
-            "avg_time_per_epoch_str": str(timedelta(seconds=int(avg_time_per_epoch))),
-            "time_per_epoch": time_per_epoch_seconds,
-        }
-
-        logger.info(
-            "\nNote:\n- 'total_time' includes the data loading time, training time and testing time.\n- 'time_per_epoch' measures the training time only.\n"
-        )
-        logger.info(metrics)
-
-    if world_size > 1:
-        cleanup()
 
 
 def parse_args():

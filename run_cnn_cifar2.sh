@@ -1,50 +1,45 @@
 #!/bin/bash
 
 # Define arrays of sigma values, batch sizes, and seeds
-sigmas=(1.0)  #2.0 4.0 6.0 8.0 10.0
-batch_sizes=(512) # 128 256
-seeds=(333) # 123 456
+sigmas=(8.0 10.0)  #2.0 4.0 6.0 8.0 10.0
+batch_sizes=(256) # 128 256
+seeds=(33) # 123 456
+red_rates=(0.7)
 
-epochs=30
-# checkpoint_base="/home/zahid/work/d2p2sgd/ckpt/CNN_cifar"
-# log_base="/home/zahid/work/d2p2sgd/log/CNN_cifar"
+epochs=40
+# checkpoint_base="/home/zahid/work/d2p2/d2p2sgd/ckpt/CNN_cifar"
+# log_base="/home/zahid/work/d2p2/d2p2sgd/log/CNN_cifar"
 
-# Function to run the script for a given combination of parameters
-run_script() {
-    local sigma="$1"
-    local batch_size="$2"
-    local seed="$3"
-    # local checkpoint_file="${checkpoint_base}/sigma_${sigma}_batch_${batch_size}_seed_${seed}"
-    # local log_dir="${log_base}/sigma_${sigma}_batch_${batch_size}_seed_${seed}"
+# --checkpoint-file "${checkpoint_file}" \
+# --log-dir "${log_dir}" \
+# --local_rank -1 \
+# --device gpu \
 
-    echo "---------------------------------------------------------"
-    echo "  Sigma: $sigma, Batch size: $batch_size, Seed: $seed"
-    echo "---------------------------------------------------------"
-
-    python mnist.py \
-        --epochs ${epochs} \
-        --sigma ${sigma} \
-        # --checkpoint-file "${checkpoint_file}" \
-        # --log-dir "${log_dir}" \
-        # --local_rank -1 \
-        # --device gpu \
-        --batch-size ${batch_size} \
-        # --workers 4 \
-        --seed ${seed}
-}
-
-# Run the script for different parameter combinations in parallel
 for sigma in "${sigmas[@]}"
 do
     for batch_size in "${batch_sizes[@]}"
     do
         for seed in "${seeds[@]}"
         do
-            # Run each combination in the background
-            run_script "$sigma" "$batch_size" "$seed" &
+
+            for red_rate in "${red_rates[@]}"
+            do
+                # checkpoint_file="${checkpoint_base}/sigma_${sigma}_batch_${batch_size}_seed_${seed}"
+                # log_dir="${log_base}/sigma_${sigma}_batch_${batch_size}_seed_${seed}"
+
+                echo "---------------------------------------------------------"
+                echo "  Sigma: $sigma, Batch size: $batch_size, Seed: $seed", 
+                echo "---------------------------------------------------------"
+
+                python fmnist.py \
+                    --epochs ${epochs} \
+                    --sigma ${sigma} \
+                    --batch-size ${batch_size} \
+                    --seed ${seed}\
+                    --red_rate ${red_rate}
+            
+            done
+            # sleep 10s
         done
     done
 done
-
-# Wait for all background processes to finish
-wait
