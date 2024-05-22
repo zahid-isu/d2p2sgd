@@ -15,6 +15,7 @@ parser = argparse.ArgumentParser(description='Process some integers.')
 parser.add_argument('--root_dir', type=str, default='log')
 parser.add_argument('--sigmas', nargs='+', type=int, default=[1.0, 1.5, 2.0, 4.0])
 parser.add_argument('--red_rates', nargs='+', type=int, default=[0.3, 0.5, 0.7])
+parser.add_argument('--epochs', type=int, default=40)
 parser.add_argument('--batch_sizes', nargs='+', type=int, default=[128, 256, 512, 1024])
 parser.add_argument('--datasets', nargs='+', type=str, default=["cifar10"])
 parser.add_argument('--dp_modes', nargs='+', type=str, default=["None", "static", "dynamic", "RP", "d2p2"])
@@ -28,6 +29,7 @@ sigmas = args.sigmas
 datasets = args.datasets
 red_rates = args.red_rates
 batch_sizes = args.batch_sizes
+epochs=args.epochs
 plot_name = args.name
 # Define the single-value variables based on input arguments
 single_value_vars = [arg for arg in vars(args) if isinstance(getattr(args, arg), list) and len(getattr(args, arg)) == 1]
@@ -43,11 +45,15 @@ dp_modes_names = {
 }
 
 dataset_names = {'cifar10': "CIFAR-10", 'cifar100': "CIFAR-100", 'tinyimgnt': 'Tiny ImageNet'}
-configuration = { 'DP Mode': [dp_modes_names[dp_mode] for dp_mode in dp_modes], 
-                'Dataset': [dataset_names[dataset] for dataset in datasets],
-                'Sigma': [sigma for sigma in sigmas], 
-                'Reduction Rate':[red_rate for red_rate in red_rates], 
-                'Batch Size': [batch_size for batch_size in batch_sizes]}
+
+configuration = {
+    'DP Mode': [dp_modes_names[dp_mode] for dp_mode in dp_modes],
+    'Dataset': [dataset_names[dataset] for dataset in datasets],
+    'Sigma': sigmas,
+    'Reduction Rate': red_rates,
+    'Batch Size': batch_sizes,
+    'Epochs': epochs
+}
 
 # Create initial part of the title
 title_parts = []
@@ -66,18 +72,14 @@ if not os.path.exists(figures_dir):
     os.makedirs(figures_dir)
 
 # Function to collect result CSV files
-def collect_results(train_results, sigma, batch_size, seed, red_rate):
-    filename = f'log/CNN_cifar/{current_time}_sigma_{sigma}_batch_{batch_size}_seed_{seed}_red_rate_{red_rate}'
+def collect_results(root_dir, sigma, batch_size, seed, red_rate, epochs):
+    file_path = os.path.join('log','CNN_cifar', f'sigma_{sigma}', f'batch_{batch_size}', f'rr_{red_rate}',f'epo_{epochs}')
+
     #print(file_path)
-    file_list = glob.glob(os.path.join(file_path, 'random_seed_*', 'accuracy_matrix.csv'))
+    file_list = glob.glob(os.path.join(file_path, 'seed_*', '*.json'))
     return file_list
-# Function to collect result CSV files
-def collect_init_results(root_init_dir, dataset, arch, init_model, wsize, data_dist, init_epochs):
-    file_path = os.path.join(root_init_dir, dataset, arch, init_model, f'models_no{wsize}', f'data_dist_{data_dist}',
-                             f'num_epochs_{init_epochs}')
-    #print(file_path)
-    file_list = glob.glob(os.path.join(file_path, 'random_seed_*', 'model_accuracies.csv'))
-    return file_list
+
+
 # Function to process data
 def process_data(file_list):
     all_accuracies = []
@@ -97,26 +99,6 @@ def process_data(file_list):
     std_loss = np.std(all_losses)
     return mean_accuracy, std_accuracy, mean_loss, std_loss
 
-def process_init_data(file_list):
-    file_list = [f for f in file_list if 'random_seed_42' not in f]
-    all_accuracies = []
-    all_losses = []
-    for file in file_list:
-        df = pd.read_csv(file)
-        accuracy_column = df['All Classes Test Accuracy']
-        if 'All Classes Test Loss' in df.columns:
-            loss_column = df['All Classes Test Loss']
-        elif 'All Classes Train Loss' in df.columns:
-            loss_column = df['All Classes Train Loss'] 
-        all_accuracies.extend(accuracy_column)
-        all_losses.extend(loss_column)
-
-    mean_accuracy = np.mean(all_accuracies)
-    std_accuracy = np.std(all_accuracies)
-    mean_loss = np.mean(all_losses)
-    std_loss = np.std(all_losses)
-    
-    return mean_accuracy, std_accuracy, mean_loss, std_loss
 
 def plot_data(average_data, std_data, label, ylabel, x_values, plot_init, average_init_data, std_init_data, color):
     # Add more matching_algs here
@@ -151,8 +133,6 @@ def plot_data(average_data, std_data, label, ylabel, x_values, plot_init, averag
 
 all_accuracies = []
 all_losses = []
-all_init_accuracies = []
-all_init_losses = []
 labels = []
 # colors = ['b', 'g', 'r', 'c', 'm', 'y', 'k']
 # colors = ['#004488', '#DDAA33', '#BB5566', '#000000', '#999933', '#332288', '#88CCEE']
@@ -162,7 +142,7 @@ colors_idx = []
 label_idx = 0
 # Iterate through input combinations
 for dataset in datasets:
-    for arch in archs:
+    for sigma in sigmas:
         for wsize in nums_models:
             for data_dist in data_dists:
                 current_init_accuracies = []
