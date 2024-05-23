@@ -81,8 +81,8 @@ def plot_combined_results(train_results, sigma, batch_size, seed):
 
     current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
-    filename = f'log/CNN_cifar/P200_red30_{current_time}_sigma_{sigma}_batch_{batch_size}_seed_{seed}'
-    fig.suptitle(f'CNN_CIFAR_sigma_{sigma}_batch_{batch_size}', fontsize=16)
+    filename = f'log/CNN_cifar/{current_time}_sigma_{sigma}_batch_{batch_size}_seed_{seed}'
+    fig.suptitle(f'CNN_CIFAR10_sigma_{sigma}_batch_{batch_size}', fontsize=16)
     plt.savefig(f"{filename}.png")
     
     with open(f"{filename}.json", "w") as file:
@@ -316,7 +316,7 @@ def main():
             device = 0
         else:
             # device = "cpu"
-            device = torch.device("cuda:1" if torch.cuda.is_available() else "cpu")
+            device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
             rank = 0
             world_size = 1
 
