@@ -14,8 +14,6 @@ seeds=(33) # 123 456
 
 
 epochs=50
-# checkpoint_base="/home/zahid/work/d2p2/d2p2sgd/ckpt/CNN_cifar"
-# log_base="/home/zahid/work/d2p2/d2p2sgd/log/CNN_cifar"
 
 for sigma in "${sigmas[@]}"s
 do
@@ -50,6 +48,5 @@ do
     done
 done
 
-# Wait for any remaining background processes to finish
 wait
 

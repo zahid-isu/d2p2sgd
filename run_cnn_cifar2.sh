@@ -7,8 +7,6 @@ seeds=(33) # 123 456
 red_rates=(0.7)
 
 epochs=40
-# checkpoint_base="/home/zahid/work/d2p2/d2p2sgd/ckpt/CNN_cifar"
-# log_base="/home/zahid/work/d2p2/d2p2sgd/log/CNN_cifar"
 
 # --checkpoint-file "${checkpoint_file}" \
 # --log-dir "${log_dir}" \
