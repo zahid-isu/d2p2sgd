@@ -87,7 +87,7 @@ def plot_combined_results(train_results, sigma, batch_size, red_rate, seed):
 
     current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
-    filename = f'rrate/CNN_svhn/{current_time}_sigma_{sigma}_batch_{batch_size}_seed_{seed}_rrate_{red_rate}'
+    filename = f'log/CNN_svhn/{current_time}_sigma_{sigma}_batch_{batch_size}_seed_{seed}_rrate_{red_rate}'
     fig.suptitle(f'CNN_SVHN_sigma_{sigma}_batch_{batch_size}_rrate{red_rate}', fontsize=16)
     plt.savefig(f"{filename}.png")
     

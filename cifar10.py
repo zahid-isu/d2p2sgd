@@ -40,6 +40,10 @@ from opacus.grad_sample.functorch import make_functional
 from torch.func import grad_and_value, vmap
 # from torch.nn.parallel import DistributedDataParallel as DDP
 from torchvision.datasets import CIFAR10
+from torchvision.models import resnet18
+from torch.nn import GroupNorm
+
+
 from tqdm import tqdm
 import matplotlib.pyplot as plt
 import torch.profiler as profiler
@@ -56,7 +60,7 @@ logger = logging.getLogger("ddp")
 logger.setLevel(level=logging.INFO)
 
 
-def plot_combined_results(train_results, sigma, batch_size, seed):
+def plot_combined_results(train_results, sigma, batch_size, red_rate, seed):
 
     fig, axs = plt.subplots(2, figsize=(10, 10), dpi=400)
 
@@ -81,8 +85,8 @@ def plot_combined_results(train_results, sigma, batch_size, seed):
 
     current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
-    filename = f'log/CNN_cifar/{current_time}_sigma_{sigma}_batch_{batch_size}_seed_{seed}'
-    fig.suptitle(f'CNN_CIFAR10_sigma_{sigma}_batch_{batch_size}', fontsize=16)
+    filename = f'log/CNN_cifar/{current_time}_sigma_{sigma}_batch_{batch_size}_seed_{seed}_rrate_{red_rate}'
+    fig.suptitle(f'CNN_CIFAR10_sigma_{sigma}_batch_{batch_size}_rrate_{red_rate}', fontsize=16)
     plt.savefig(f"{filename}.png")
     
     with open(f"{filename}.json", "w") as file:
@@ -141,6 +145,14 @@ def setup(args):
 def cleanup():
     torch.distributed.destroy_process_group()
 
+def replace_bn_with_gn(model, num_groups=32):
+    for name, module in model.named_children():
+        if isinstance(module, nn.BatchNorm2d):
+            setattr(model, name, GroupNorm(num_groups=num_groups, num_channels=module.num_features))
+        else:
+            replace_bn_with_gn(module, num_groups)
+
+    return model
 
 def convnet(num_classes):
     return nn.Sequential(
@@ -159,6 +171,20 @@ def convnet(num_classes):
         nn.Flatten(start_dim=1, end_dim=-1),
         nn.Linear(64, num_classes, bias=True),
     )
+
+# class RN18(nn.Module):
+
+#     def __init__(self):
+#         super().__init__()
+#         weights = ResNet18_Weights.DEFAULT
+#         self.resnet18 = resnet18(weights=weights, progress=False)
+#         self.resnet18.fc = nn.Linear(self.resnet18.fc.in_features, 10) 
+#         self.transforms = weights.transforms(antialias=True)
+
+#     def forward(self, x: torch.Tensor) -> torch.Tensor:
+#         x = self.transforms(x)
+#         y_pred = self.resnet18(x)
+#         return y_pred
 
 
 def save_checkpoint(state, is_best, filename="checkpoint.tar"):
@@ -375,7 +401,15 @@ def main():
 
         best_acc1 = 0
 
-        model = convnet(num_classes=10)
+        # Select model
+        if args.model == "cnn":
+            model = convnet(num_classes=10)
+        elif args.model == "rn18":
+            model = resnet18(pretrained=False)
+            model.fc = nn.Linear(model.fc.in_features, 10)
+            model = replace_bn_with_gn(model)
+
+        # model = convnet(num_classes=10)
         model = model.to(device)
 
         # Use the right distributed module wrapper if distributed training is enabled
@@ -449,10 +483,12 @@ def main():
             
             elif not args.disable_dp and dp_mode == 'RP':  # RP DP-SGD
                 optimizer.noise_multiplier = args.sigma
+                optimizer.red_rate = args.red_rate
             
             elif not args.disable_dp and dp_mode == 'd2p2':  # D2P2 DP-SGD
                 new_noise_multiplier = args.sigma / (epoch ** 0.25)
                 optimizer.noise_multiplier = new_noise_multiplier
+                optimizer.red_rate = args.red_rate
 
                 print(f"Epoch {epoch}: Updated d2p2 sigma to {new_noise_multiplier:.4f}")
             
@@ -482,7 +518,7 @@ def main():
 
         print(train_results)
     
-    plot_combined_results(train_results, args.sigma, args.batch_size, args.seed)
+    plot_combined_results(train_results, args.sigma, args.batch_size,args.red_rate, args.seed)
 
 
 
@@ -497,6 +533,14 @@ def parse_args():
         metavar="N",
         help="number of data loading workers (default: 2)",
     )
+    parser.add_argument(
+        "--model", 
+        default="cnn",
+        type=str, 
+        choices=["cnn", "rn18"], 
+        required=True, 
+        help="Model type to use: 'cnn' or 'rn18'"
+    )
 
     parser.add_argument(
         "--rp",
@@ -506,6 +550,7 @@ def parse_args():
     )
 
     parser.add_argument(
+        "-n",
         "--epochs",
         default=2,
         type=int,
@@ -520,7 +565,6 @@ def parse_args():
         help="manual epoch number (useful on restarts)",
     )
     parser.add_argument(
-        "-b",
         "--batch-size-test",
         default=512,
         type=int,
@@ -530,6 +574,7 @@ def parse_args():
         "using Data Parallel or Distributed Data Parallel",
     )
     parser.add_argument(
+        "-b",
         "--batch-size",
         default=512,
         type=int,
@@ -676,6 +721,12 @@ def parse_args():
         type=int,
         default=0,
         help="debug level (default: 0)",
+    )
+    parser.add_argument(
+        "--red_rate",
+        type=float,
+        default=0.3,
+        help="random proj rate",
     )
 
     return parser.parse_args()

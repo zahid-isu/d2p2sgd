@@ -440,7 +440,7 @@ class DPOptimizer(Optimizer):
 
     def _random_projection(self, gradient: torch.Tensor, p, red_rate = 0.3) -> torch.Tensor:
         
-        print("red_rate", red_rate)
+        # print("red_rate", red_rate)
         grad_shape = gradient.shape # (32,3,3,3)
         flattened_grad = torch.flatten(gradient)
         # flattened_grad = gradient.view(grad_shape[0], -1) # (32, 27) 

@@ -1,17 +1,12 @@
 #!/bin/bash
 
-# Define arrays of sigma values, batch sizes, and seeds
-sigmas=(8.0 10.0)  #2.0 4.0 6.0 8.0 10.0
-batch_sizes=(256) # 128 256
-seeds=(33) # 123 456
-red_rates=(0.7)
+# args to sweep 
+sigmas=(3.0)  #2.0 4.0 6.0 8.0 10.0
+batch_sizes=(256) # 128 256 512 1024
+seeds=(33) # 22 44 55 66
+red_rates=(0.3) # 0.1 0.3 0.5 0.7 0.9
 
-epochs=40
-
-# --checkpoint-file "${checkpoint_file}" \
-# --log-dir "${log_dir}" \
-# --local_rank -1 \
-# --device gpu \
+epochs=2
 
 for sigma in "${sigmas[@]}"
 do
@@ -22,8 +17,6 @@ do
 
             for red_rate in "${red_rates[@]}"
             do
-                # checkpoint_file="${checkpoint_base}/sigma_${sigma}_batch_${batch_size}_seed_${seed}"
-                # log_dir="${log_base}/sigma_${sigma}_batch_${batch_size}_seed_${seed}"
 
                 echo "---------------------------------------------------------"
                 echo "  Sigma: $sigma, Batch size: $batch_size, Seed: $seed", 
@@ -37,7 +30,6 @@ do
                     --red_rate ${red_rate}
             
             done
-            # sleep 10s
         done
     done
 done
