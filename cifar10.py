@@ -41,6 +41,9 @@ from torch.func import grad_and_value, vmap
 # from torch.nn.parallel import DistributedDataParallel as DDP
 from torchvision.datasets import CIFAR10
 from torchvision.models import resnet18
+from torchvision.models.resnet import BasicBlock
+import torch.nn.functional as F
+
 from torch.nn import GroupNorm
 
 
@@ -60,7 +63,7 @@ logger = logging.getLogger("ddp")
 logger.setLevel(level=logging.INFO)
 
 
-def plot_combined_results(train_results, sigma, batch_size, red_rate, seed):
+def plot_combined_results(train_results, sigma, batch_size, red_rate, seed, model_name):
 
     fig, axs = plt.subplots(2, figsize=(10, 10), dpi=400)
 
@@ -86,7 +89,7 @@ def plot_combined_results(train_results, sigma, batch_size, red_rate, seed):
     current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
     filename = f'log/CNN_cifar/{current_time}_sigma_{sigma}_batch_{batch_size}_seed_{seed}_rrate_{red_rate}'
-    fig.suptitle(f'CNN_CIFAR10_sigma_{sigma}_batch_{batch_size}_rrate_{red_rate}', fontsize=16)
+    fig.suptitle(f'{model_name}_CIFAR10_sigma_{sigma}_batch_{batch_size}_rrate_{red_rate}', fontsize=16)
     plt.savefig(f"{filename}.png")
     
     with open(f"{filename}.json", "w") as file:
@@ -145,7 +148,7 @@ def setup(args):
 def cleanup():
     torch.distributed.destroy_process_group()
 
-def replace_bn_with_gn(model, num_groups=32):
+def replace_bn_with_gn(model, num_groups=16):
     for name, module in model.named_children():
         if isinstance(module, nn.BatchNorm2d):
             setattr(model, name, GroupNorm(num_groups=num_groups, num_channels=module.num_features))
@@ -172,19 +175,48 @@ def convnet(num_classes):
         nn.Linear(64, num_classes, bias=True),
     )
 
-# class RN18(nn.Module):
+class SmallResNet(nn.Module):
+    def __init__(self, block, layers, num_classes=10):
+        super(SmallResNet, self).__init__()
+        self.inplanes = 16
+        self.conv1 = nn.Conv2d(3, 16, kernel_size=3, stride=1, padding=1, bias=False)
+        self.bn1 = nn.BatchNorm2d(16)
+        self.layer1 = self._make_layer(block, 16, layers[0])
+        self.layer2 = self._make_layer(block, 32, layers[1], stride=2)
+        self.layer3 = self._make_layer(block, 64, layers[2], stride=2)
+        self.fc = nn.Linear(64, num_classes)
 
-#     def __init__(self):
-#         super().__init__()
-#         weights = ResNet18_Weights.DEFAULT
-#         self.resnet18 = resnet18(weights=weights, progress=False)
-#         self.resnet18.fc = nn.Linear(self.resnet18.fc.in_features, 10) 
-#         self.transforms = weights.transforms(antialias=True)
+    def _make_layer(self, block, planes, blocks, stride=1):
+        downsample = None
+        if stride != 1 or self.inplanes != planes:
+            downsample = nn.Sequential(
+                nn.Conv2d(self.inplanes, planes, kernel_size=1, stride=stride, bias=False),
+                nn.BatchNorm2d(planes),
+            )
 
-#     def forward(self, x: torch.Tensor) -> torch.Tensor:
-#         x = self.transforms(x)
-#         y_pred = self.resnet18(x)
-#         return y_pred
+        layers = []
+        layers.append(block(self.inplanes, planes, stride, downsample))
+        self.inplanes = planes
+        for _ in range(1, blocks):
+            layers.append(block(self.inplanes, planes))
+
+        return nn.Sequential(*layers)
+
+    def forward(self, x):
+        x = self.conv1(x)
+        x = self.bn1(x)
+        x = F.relu(x)
+        x = self.layer1(x)
+        x = self.layer2(x)
+        x = self.layer3(x)
+        x = F.avg_pool2d(x, 8)
+        x = x.view(x.size(0), -1)
+        x = self.fc(x)
+
+        return x
+
+def small_resnet18(num_classes=10):
+    return SmallResNet(BasicBlock, [2, 2, 2], num_classes)
 
 
 def save_checkpoint(state, is_best, filename="checkpoint.tar"):
@@ -402,12 +434,11 @@ def main():
         best_acc1 = 0
 
         # Select model
-        if args.model == "cnn":
+        if args.model == "CNN":
             model = convnet(num_classes=10)
-        elif args.model == "rn18":
-            model = resnet18(pretrained=False)
-            model.fc = nn.Linear(model.fc.in_features, 10)
-            model = replace_bn_with_gn(model)
+        elif args.model == "ResNet18":
+            model = small_resnet18(num_classes=10)
+            model = replace_bn_with_gn(model, num_groups=16)
 
         # model = convnet(num_classes=10)
         model = model.to(device)
@@ -518,7 +549,7 @@ def main():
 
         print(train_results)
     
-    plot_combined_results(train_results, args.sigma, args.batch_size,args.red_rate, args.seed)
+    plot_combined_results(train_results, args.sigma, args.batch_size,args.red_rate, args.seed, args.model)
 
 
 
@@ -535,9 +566,9 @@ def parse_args():
     )
     parser.add_argument(
         "--model", 
-        default="cnn",
+        default="CNN",
         type=str, 
-        choices=["cnn", "rn18"], 
+        choices=["CNN", "ResNet18"], 
         required=True, 
         help="Model type to use: 'cnn' or 'rn18'"
     )

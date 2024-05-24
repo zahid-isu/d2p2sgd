@@ -8,11 +8,11 @@ trap "kill_background_processes; exit 1" SIGINT SIGTERM
 
 # args to sweep
 sigmas=(3.0)  # 1.0 2.0 3.0 4.0 6.0 8.0 10.0
-batch_sizes=(64) # 128 256 512 1024
+batch_sizes=(1024) # 128 256 512 1024
 seeds=(33) # 123 456
 red_rates=(0.5) #0.1 0.3 0.5 0.7 0.9
 
-epochs=2
+epochs=40
 
 for sigma in "${sigmas[@]}"
 do
@@ -34,10 +34,10 @@ do
                 --local_rank -1 \
                 --device gpu \
                 --batch-size ${batch_size} \
-                --workers 16 \
+                --workers 20 \
                 --seed ${seed}\
                 --red_rate ${red_rate}\
-                --model "rn18"
+                --model "ResNet18"
             done
         done
     done
